@@ -59,6 +59,74 @@ pub fn save_project(_app: &tauri::AppHandle, path: &Path, state: &SessionState) 
     Ok(())
 }
 
+/// Auto-save session to recent folder. Uses session_id and created_at for uniqueness.
+pub fn auto_save_project(app: &tauri::AppHandle, state: &SessionState) -> Result<String, String> {
+    let dir = paths::recent_projects_dir(app)?;
+    let safe_id: String = state
+        .session_id
+        .chars()
+        .map(|c| {
+            if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let filename = format!("{}_{}.json", safe_id, state.created_at);
+    let path = dir.join(&filename);
+    save_project(app, &path, state)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Delete a project file and optionally its associated audio files.
+pub fn delete_project(path: &Path, delete_audio: bool) -> Result<(), String> {
+    if delete_audio {
+        if let Ok(json) = std::fs::read_to_string(path) {
+            if let Ok(file) = serde_json::from_str::<ProjectFile>(&json) {
+                for p in [&file.audio_paths.loopback, &file.audio_paths.microphone] {
+                    if let Some(ref pth) = p {
+                        let p = Path::new(pth);
+                        if p.exists() {
+                            let _ = std::fs::remove_file(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Purge recent projects older than retention_days. Deletes JSON and associated audio files.
+pub fn purge_old_recent(app: &tauri::AppHandle, retention_days: u64) -> Result<u32, String> {
+    let dir = paths::recent_projects_dir(app)?;
+    if !dir.exists() {
+        return Ok(0);
+    }
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
+    let cutoff_secs = cutoff.timestamp() as u64;
+    let mut purged = 0u32;
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().map_or(false, |e| e == "json" || e == "dscribe") {
+            if let Ok(json) = std::fs::read_to_string(&path) {
+                if let Ok(meta) = serde_json::from_str::<ProjectMetaPartial>(&json) {
+                    if let Some(created) = meta.created_at {
+                        if created < cutoff_secs {
+                            let _ = delete_project(&path, true);
+                            purged += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(purged)
+}
+
 pub fn load_project(path: &Path) -> Result<SessionState, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let file: ProjectFile = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -66,21 +134,70 @@ pub fn load_project(path: &Path) -> Result<SessionState, String> {
 }
 
 pub fn list_projects(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
-    let dir = paths::projects_dir(app)?;
-    let mut names = Vec::new();
-    if dir.exists() {
-        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json" || e == "dscribe") {
-                if let Some(name) = path.file_stem() {
-                    names.push(name.to_string_lossy().into_owned());
-                }
-            }
+    list_projects_with_meta(app).map(|v| v.into_iter().map(|p| p.name).collect())
+}
+
+/// Metadata for display in project list.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectMeta {
+    pub name: String,
+    pub path: String,
+    pub guild_name: Option<String>,
+    pub channel_name: Option<String>,
+    pub created_at: u64,
+}
+
+/// Minimal struct for reading metadata without full deserialization.
+#[derive(serde::Deserialize)]
+struct ProjectMetaPartial {
+    created_at: Option<u64>,
+    guild_name: Option<String>,
+    channel_name: Option<String>,
+}
+
+fn collect_projects_from_dir(dir: &Path) -> Result<Vec<ProjectMeta>, String> {
+    let mut projects = Vec::new();
+    if !dir.exists() {
+        return Ok(projects);
+    }
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_file() && path.extension().map_or(false, |e| e == "json" || e == "dscribe") {
+            let path_str = path.to_string_lossy().into_owned();
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let meta = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|json| serde_json::from_str::<ProjectMetaPartial>(&json).ok())
+                .unwrap_or(ProjectMetaPartial {
+                    created_at: None,
+                    guild_name: None,
+                    channel_name: None,
+                });
+            projects.push(ProjectMeta {
+                name,
+                path: path_str,
+                guild_name: meta.guild_name,
+                channel_name: meta.channel_name,
+                created_at: meta.created_at.unwrap_or(0),
+            });
         }
     }
-    names.sort();
-    Ok(names)
+    Ok(projects)
+}
+
+pub fn list_projects_with_meta(app: &tauri::AppHandle) -> Result<Vec<ProjectMeta>, String> {
+    let projects_dir = paths::projects_dir(app)?;
+    let recent_dir = paths::recent_projects_dir(app)?;
+    let mut projects = collect_projects_from_dir(&projects_dir)?;
+    if recent_dir != projects_dir {
+        projects.extend(collect_projects_from_dir(&recent_dir)?);
+    }
+    projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(projects)
 }
 
 /// Generate project name from template.

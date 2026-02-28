@@ -45,6 +45,16 @@
   border-radius: 8px;
 }
 
+.playback-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.playback-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .playback-mode,
 .channel-toggle {
   display: flex;
@@ -98,6 +108,11 @@
   margin-bottom: 0.5rem;
   background: rgba(0, 0, 0, 0.02);
   border-radius: 6px;
+}
+
+.segment.active {
+  background: rgba(100, 108, 255, 0.12);
+  border-left: 3px solid #646cff;
 }
 
 .segment:last-child {
@@ -163,10 +178,148 @@
   margin-top: 0.25rem;
 }
 
-.recent-hint {
-  font-size: 0.85rem;
-  color: #888;
+.project-list {
+  margin: 1rem 0;
+}
+
+.project-list h4 {
   margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.project-list-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+}
+
+.project-list-items li {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.project-list-items li:last-child {
+  border-bottom: none;
+}
+
+.project-list-item {
+  display: flex;
+  align-items: stretch;
+}
+
+.project-list-item .project-item {
+  flex: 1;
+}
+
+.project-delete-btn {
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 1rem;
+}
+
+.project-delete-btn:hover {
+  opacity: 1;
+  background: rgba(200, 0, 0, 0.1);
+}
+
+.delete-btn {
+  color: #c00;
+}
+
+.delete-btn:hover {
+  background: rgba(200, 0, 0, 0.1);
+}
+
+.delete-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.delete-modal {
+  background: #fff;
+  color: #222;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  min-width: 320px;
+}
+
+.delete-modal h4 {
+  margin: 0 0 1rem 0;
+  color: #222;
+}
+
+.delete-audio-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: #222;
+}
+
+.delete-modal-actions button:not(.delete-confirm-btn) {
+  color: #333;
+  background: #e0e0e0;
+}
+
+.delete-modal-actions button:not(.delete-confirm-btn):hover {
+  background: #d0d0d0;
+}
+
+.delete-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.delete-confirm-btn {
+  background: #c00;
+  color: white;
+}
+
+.delete-confirm-btn:hover {
+  background: #a00;
+}
+
+.project-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  transition: background 0.15s;
+}
+
+.project-item:hover {
+  background: rgba(100, 108, 255, 0.08);
+}
+
+.project-item .project-name {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.2rem;
+}
+
+.project-item .project-meta {
+  display: block;
+  font-size: 0.8rem;
+  color: #888;
 }
 
 .button-row {

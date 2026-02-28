@@ -8,10 +8,10 @@ mod transcription;
 
 use log::{debug, warn};
 use audio::{start_audio_capture, stop_audio_capture, AudioCaptureHandle};
-use discord_rpc::{get_channel_info, DiscordRpcClient};
+use discord_rpc::{get_channel_info, save_tokens, load_tokens, DiscordRpcClient};
 use export::{export_srt, export_vtt};
-use paths::{app_data_dir, models_dir, projects_dir};
-use project::{format_project_name, list_projects, load_project, save_project};
+use paths::{app_data_dir, discord_tokens_path, models_dir, projects_dir};
+use project::{auto_save_project, delete_project, format_project_name, list_projects, list_projects_with_meta, load_project, purge_old_recent, save_project};
 use tauri_plugin_shell::ShellExt;
 use transcription::{download_model, extract_segment, WhisperCliBackend};
 use session::{record_speaking_event, start_session, stop_session, SessionAudioPaths, SessionSegment, SessionState};
@@ -35,13 +35,26 @@ fn get_models_dir(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn discord_rpc_connect(
+    app: tauri::AppHandle,
     client_id: String,
     client_secret: String,
     rpc_origin: String,
 ) -> Result<(), String> {
-    let client = DiscordRpcClient::new(client_id, client_secret, rpc_origin);
+    let client = DiscordRpcClient::new(client_id.clone(), client_secret.clone(), rpc_origin.clone());
     let (tx, mut rx) = mpsc::unbounded_channel();
-    client.connect(tx).await?;
+    let refresh_token = client.connect(tx).await?;
+    if let Some(refresh) = refresh_token {
+        let path = discord_tokens_path(&app)?;
+        save_tokens(
+            &path,
+            &discord_rpc::DiscordTokens {
+                client_id,
+                client_secret,
+                rpc_origin,
+                refresh_token: refresh,
+            },
+        )?;
+    }
     tokio::spawn(async move {
         while let Some(evt) = rx.recv().await {
             match evt {
@@ -58,6 +71,48 @@ async fn discord_rpc_connect(
 }
 
 #[tauri::command]
+async fn discord_rpc_auto_reconnect(app: tauri::AppHandle) -> Result<bool, String> {
+    let path = discord_tokens_path(&app)?;
+    let tokens = match load_tokens(&path)? {
+        Some(t) => t,
+        None => return Ok(false),
+    };
+    let client = DiscordRpcClient::new(
+        tokens.client_id.clone(),
+        tokens.client_secret.clone(),
+        tokens.rpc_origin.clone(),
+    );
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let new_refresh = client
+        .connect_with_refresh_token(tx, tokens.refresh_token)
+        .await?;
+    if let Some(refresh) = new_refresh {
+        save_tokens(
+            &path,
+            &discord_rpc::DiscordTokens {
+                client_id: tokens.client_id,
+                client_secret: tokens.client_secret,
+                rpc_origin: tokens.rpc_origin,
+                refresh_token: refresh,
+            },
+        )?;
+    }
+    tokio::spawn(async move {
+        while let Some(evt) = rx.recv().await {
+            match evt {
+                discord_rpc::SpeakingEvent::Start { user_id } => {
+                    record_speaking_event(true, user_id);
+                }
+                discord_rpc::SpeakingEvent::Stop { user_id } => {
+                    record_speaking_event(false, user_id);
+                }
+            }
+        }
+    });
+    Ok(true)
+}
+
+#[tauri::command]
 async fn discord_rpc_connection_state() -> Result<String, String> {
     Ok("Disconnected".into())
 }
@@ -70,10 +125,12 @@ fn start_recording(
     output_path: String,
     mic_path: String,
     segment_merge_buffer_ms: Option<u64>,
+    project_name_template: Option<String>,
 ) -> Result<(), String> {
     let channel_info = get_channel_info().ok_or("Not connected to Discord. Connect in Settings first.")?;
     let user_labels: std::collections::HashMap<String, String> = channel_info.user_labels.clone();
     let buffer_ms = segment_merge_buffer_ms.unwrap_or(1000);
+    let template = project_name_template.unwrap_or_else(|| "{guild}_{channel}_{timestamp}".to_string());
     start_session(
         channel_info.guild_name,
         channel_info.channel_name,
@@ -81,6 +138,7 @@ fn start_recording(
         channel_info.self_user_id,
         user_labels,
         buffer_ms,
+        template,
     );
     let handle = start_audio_capture(
         std::path::Path::new(&output_path),
@@ -135,6 +193,26 @@ fn load_project_command(path: String) -> Result<SessionState, String> {
 #[tauri::command]
 fn list_projects_command(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     list_projects(&app)
+}
+
+#[tauri::command]
+fn list_projects_with_meta_command(app: tauri::AppHandle) -> Result<Vec<project::ProjectMeta>, String> {
+    list_projects_with_meta(&app)
+}
+
+#[tauri::command]
+fn auto_save_project_command(app: tauri::AppHandle, state: SessionState) -> Result<String, String> {
+    auto_save_project(&app, &state)
+}
+
+#[tauri::command]
+fn delete_project_command(path: String, delete_audio: bool) -> Result<(), String> {
+    delete_project(std::path::Path::new(&path), delete_audio)
+}
+
+#[tauri::command]
+fn purge_recent_command(app: tauri::AppHandle, retention_days: u64) -> Result<u32, String> {
+    purge_old_recent(&app, retention_days)
 }
 
 #[tauri::command]
@@ -478,6 +556,12 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             paths::ensure_directories(app.handle())?;
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(true) = discord_rpc_auto_reconnect(handle).await {
+                    log::info!("[d-scribe] Auto-reconnected to Discord");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -485,6 +569,7 @@ pub fn run() {
             get_projects_dir,
             get_models_dir,
             discord_rpc_connect,
+            discord_rpc_auto_reconnect,
             discord_rpc_connection_state,
             get_channel_info_command,
             start_recording,
@@ -492,6 +577,10 @@ pub fn run() {
             save_project_command,
             load_project_command,
             list_projects_command,
+            list_projects_with_meta_command,
+            auto_save_project_command,
+            delete_project_command,
+            purge_recent_command,
             format_project_name_command,
             export_transcript,
             list_models_command,

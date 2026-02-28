@@ -2,9 +2,12 @@
 
 mod client;
 mod events;
+mod token_store;
 
 #[cfg(windows)]
 mod ipc;
+
+pub use token_store::{load_tokens, save_tokens, DiscordTokens};
 
 pub use client::DiscordRpcClient;
 pub use events::{ChannelInfo, SpeakingEvent};

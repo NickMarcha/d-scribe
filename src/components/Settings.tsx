@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { load } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./Settings.css";
 
 const STORE_PATH = "settings.json";
@@ -11,6 +12,7 @@ export function Settings() {
   const [clientSecret, setClientSecret] = useState("");
   const [rpcOrigin, setRpcOrigin] = useState("https://localhost");
   const [segmentMergeBufferMs, setSegmentMergeBufferMs] = useState(1000);
+  const [recentRetentionDays, setRecentRetentionDays] = useState(10);
   const [showInstructions, setShowInstructions] = useState(false);
   const [status, setStatus] = useState("");
   const [saved, setSaved] = useState(false);
@@ -26,10 +28,12 @@ export function Settings() {
       const secret = await store.get<string>("client_secret");
       const origin = await store.get<string>("rpc_origin");
       const buffer = await store.get<number>("segment_merge_buffer_ms");
+      const retention = await store.get<number>("recent_retention_days");
       setClientId(cid || "");
       setClientSecret(secret || "");
       setRpcOrigin(origin || "https://localhost");
       setSegmentMergeBufferMs(buffer ?? 1000);
+      setRecentRetentionDays(retention ?? 10);
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
@@ -42,6 +46,7 @@ export function Settings() {
       await store.set("client_secret", clientSecret);
       await store.set("rpc_origin", rpcOrigin);
       await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
+      await store.set("recent_retention_days", recentRetentionDays);
       await store.save();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -88,13 +93,13 @@ export function Settings() {
             <ol>
               <li>
                 Go to{" "}
-                <a
-                  href="https://discord.com/developers/applications"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => openUrl("https://discord.com/developers/applications")}
                 >
                   Discord Developer Portal
-                </a>
+                </button>
               </li>
               <li>Click &quot;New Application&quot; and name it (e.g. &quot;d-scribe&quot; — avoid &quot;Discord&quot; in the name)</li>
               <li>
@@ -166,6 +171,20 @@ export function Settings() {
           />
           <span className="field-hint">
             Min silence before splitting segments (default 1000ms). Brief pauses are merged.
+          </span>
+        </div>
+        <div className="form-group">
+          <label htmlFor="recent-retention">Recent sessions retention (days)</label>
+          <input
+            id="recent-retention"
+            type="number"
+            min="1"
+            max="365"
+            value={recentRetentionDays}
+            onChange={(e) => setRecentRetentionDays(parseInt(e.target.value, 10) || 10)}
+          />
+          <span className="field-hint">
+            Auto-saved sessions older than this are purged (default 10).
           </span>
         </div>
 

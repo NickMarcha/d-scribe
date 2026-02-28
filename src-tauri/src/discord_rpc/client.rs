@@ -21,6 +21,43 @@ use uuid::Uuid;
 const RPC_PORTS: std::ops::Range<u16> = 6463..6473; // 6463 to 6472 inclusive
 const RPC_VERSION: u32 = 1;
 
+/// Exchange refresh_token for access_token. Returns (access_token, new_refresh_token).
+pub async fn refresh_access_token(
+    client_id: &str,
+    client_secret: &str,
+    redirect_uri: &str,
+    refresh_token: &str,
+) -> Result<(String, Option<String>), String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://discord.com/api/oauth2/token")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+            ("redirect_uri", redirect_uri),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Token refresh failed ({}): {}", status, body));
+    }
+
+    let data: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let access_token = data
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("No access_token in refresh response")?
+        .to_string();
+    let new_refresh = data.get("refresh_token").and_then(|v| v.as_str()).map(String::from);
+    Ok((access_token, new_refresh))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RpcConnectionState {
     Disconnected,
@@ -108,7 +145,7 @@ impl DiscordRpcClient {
     pub async fn connect(
         &self,
         tx: mpsc::UnboundedSender<SpeakingEvent>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<String>, String> {
         *self.state.connection_state.write().await = RpcConnectionState::Connecting;
 
         // On Windows: try IPC first (officially supported, no Origin validation)
@@ -131,6 +168,7 @@ impl DiscordRpcClient {
                         &rpc_origin,
                         tx,
                         ready_tx,
+                        None,
                     )
                     .await
                     {
@@ -143,14 +181,14 @@ impl DiscordRpcClient {
                     }
                 });
 
-                match ready_rx.await {
-                    Ok(Ok(())) => {
-                        info!("[discord-rpc] Auth flow complete (IPC), channel info set");
-                        return Ok(());
+                    match ready_rx.await {
+                        Ok(Ok(refresh_token)) => {
+                            info!("[discord-rpc] Auth flow complete (IPC), channel info set");
+                            return Ok(refresh_token);
+                        }
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => return Err("Connection task dropped".into()),
                     }
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => return Err("Connection task dropped".into()),
-                }
             }
             info!("[discord-rpc] IPC failed, falling back to WebSocket");
         }
@@ -181,19 +219,20 @@ impl DiscordRpcClient {
                     let tx = tx.clone();
                     let rpc_origin = self.rpc_origin.clone();
 
-                    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-                    tokio::spawn(async move {
-                        match Self::run_connection(
-                            write,
-                            read,
-                            &state,
-                            &client_id,
-                            &client_secret,
-                            &rpc_origin,
-                            tx,
-                            ready_tx,
-                        )
-                        .await
+                let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+                tokio::spawn(async move {
+                    match Self::run_connection(
+                        write,
+                        read,
+                        &state,
+                        &client_id,
+                        &client_secret,
+                        &rpc_origin,
+                        tx,
+                        ready_tx,
+                        None,
+                    )
+                    .await
                         {
                             Ok(()) => {}
                             Err(e) => {
@@ -205,12 +244,13 @@ impl DiscordRpcClient {
                     });
 
                     match ready_rx.await {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(refresh_token)) => {
+                            info!("[discord-rpc] Auth flow complete, channel info set");
+                            return Ok(refresh_token);
+                        }
                         Ok(Err(e)) => return Err(e),
                         Err(_) => return Err("Connection task dropped".into()),
                     }
-                    info!("[discord-rpc] Auth flow complete, channel info set");
-                    return Ok(());
                 }
                 Err(e) => {
                     debug!("[discord-rpc] Port {} failed: {}", port, e);
@@ -225,6 +265,125 @@ impl DiscordRpcClient {
         Err("Could not connect to Discord. Is Discord running?".into())
     }
 
+    /// Connect using a stored refresh token (no OAuth popup).
+    pub async fn connect_with_refresh_token(
+        &self,
+        tx: mpsc::UnboundedSender<SpeakingEvent>,
+        refresh_token: String,
+    ) -> Result<Option<String>, String> {
+        let (access_token, new_refresh) =
+            refresh_access_token(&self.client_id, &self.client_secret, &self.rpc_origin, &refresh_token).await?;
+        let refresh_to_save = new_refresh.as_ref().unwrap_or(&refresh_token);
+
+        *self.state.connection_state.write().await = RpcConnectionState::Connecting;
+
+        #[cfg(windows)]
+        {
+            if let Ok(ipc) = crate::discord_rpc::ipc::connect_ipc(&self.client_id).await {
+                let state = self.state.clone();
+                let client_id = self.client_id.clone();
+                let client_secret = self.client_secret.clone();
+                let tx = tx.clone();
+                let rpc_origin = self.rpc_origin.clone();
+
+                let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+                let refresh_to_return = refresh_to_save.to_string();
+                tokio::spawn(async move {
+                    match Self::run_connection_ipc(
+                        ipc,
+                        &state,
+                        &client_id,
+                        &client_secret,
+                        &rpc_origin,
+                        tx,
+                        ready_tx,
+                        Some(access_token),
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
+                        Err(e) => {
+                            error!("[discord-rpc] IPC connection error: {}", e);
+                            *state.connection_state.write().await =
+                                RpcConnectionState::Error(e.clone());
+                        }
+                    }
+                });
+
+                match ready_rx.await {
+                    Ok(Ok(_)) => {
+                        info!("[discord-rpc] Reconnect complete (IPC)");
+                        return Ok(Some(refresh_to_return));
+                    }
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err("Connection task dropped".into()),
+                }
+            }
+        }
+
+        let mut last_error = None;
+        for port in RPC_PORTS {
+            let url = format!(
+                "ws://127.0.0.1:{}/?v={}&client_id={}&encoding=json",
+                port, RPC_VERSION, self.client_id
+            );
+            let mut request = url
+                .as_str()
+                .into_client_request()
+                .map_err(|e| e.to_string())?;
+            request.headers_mut().insert(
+                "Origin",
+                http::header::HeaderValue::from_str(&self.rpc_origin).map_err(|e| e.to_string())?,
+            );
+
+            if let Ok((ws_stream, _)) = connect_async(request).await {
+                let (write, read) = ws_stream.split();
+                let state = self.state.clone();
+                let client_id = self.client_id.clone();
+                let client_secret = self.client_secret.clone();
+                let tx = tx.clone();
+                let rpc_origin = self.rpc_origin.clone();
+                let refresh_to_return = refresh_to_save.to_string();
+
+                let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+                tokio::spawn(async move {
+                    match Self::run_connection(
+                        write,
+                        read,
+                        &state,
+                        &client_id,
+                        &client_secret,
+                        &rpc_origin,
+                        tx,
+                        ready_tx,
+                        Some(access_token),
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
+                        Err(e) => {
+                            error!("[discord-rpc] Connection error: {}", e);
+                            *state.connection_state.write().await =
+                                RpcConnectionState::Error(e.clone());
+                        }
+                    }
+                });
+
+                match ready_rx.await {
+                    Ok(Ok(_)) => {
+                        info!("[discord-rpc] Reconnect complete");
+                        return Ok(Some(refresh_to_return));
+                    }
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err("Connection task dropped".into()),
+                }
+            }
+            last_error = Some("WebSocket connect failed".to_string());
+        }
+
+        Err(last_error.unwrap_or_else(|| "Could not connect to Discord".into()))
+    }
+
     async fn run_connection<W, R, E>(
         mut write: W,
         mut read: R,
@@ -233,7 +392,8 @@ impl DiscordRpcClient {
         client_secret: &str,
         redirect_uri: &str,
         tx: mpsc::UnboundedSender<SpeakingEvent>,
-        ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+        ready_tx: tokio::sync::oneshot::Sender<Result<Option<String>, String>>,
+        access_token_override: Option<String>,
     ) -> Result<(), String>
     where
         W: SinkExt<Message> + Unpin,
@@ -284,71 +444,79 @@ impl DiscordRpcClient {
         }
 
         *state.connection_state.write().await = RpcConnectionState::AwaitingAuth;
-        info!("[discord-rpc] Sending AUTHORIZE (approve in Discord popup)...");
 
-        // AUTHORIZE
-        let nonce = Uuid::new_v4().to_string();
-        let auth_cmd = serde_json::json!({
-            "cmd": "AUTHORIZE",
-            "nonce": nonce,
-            "args": {
-                "client_id": client_id,
-                "scopes": ["rpc", "identify"]
-            }
-        });
+        let (access_token, refresh_token_to_save) = if let Some(access) = access_token_override {
+            info!("[discord-rpc] Using pre-obtained access token");
+            (access, None)
+        } else {
+            info!("[discord-rpc] Sending AUTHORIZE (approve in Discord popup)...");
 
-        let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
-        state.pending.write().await.insert(nonce.clone(), tx_oneshot);
-        write
-            .send(Message::Text(auth_cmd.to_string()))
-            .await
-            .map_err(|e| e.to_string())?;
+            // AUTHORIZE
+            let nonce = Uuid::new_v4().to_string();
+            let auth_cmd = serde_json::json!({
+                "cmd": "AUTHORIZE",
+                "nonce": nonce,
+                "args": {
+                    "client_id": client_id,
+                    "scopes": ["rpc", "identify"]
+                }
+            });
 
-        let auth_response = rx_oneshot.await.map_err(|_| "Auth response channel closed")?;
-        let code = match auth_response.get("code").and_then(|v| v.as_str()) {
-            Some(c) => c.to_string(),
-            None => {
-                let err = "No authorization code. Did you approve in the Discord popup? If no popup appeared, check RPC Origin and Redirect URI.".to_string();
+            let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
+            state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+            write
+                .send(Message::Text(auth_cmd.to_string()))
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let auth_response = rx_oneshot.await.map_err(|_| "Auth response channel closed")?;
+            let code = match auth_response.get("code").and_then(|v| v.as_str()) {
+                Some(c) => c.to_string(),
+                None => {
+                    let err = "No authorization code. Did you approve in the Discord popup? If no popup appeared, check RPC Origin and Redirect URI.".to_string();
+                    let _ = ready_tx.send(Err(err.clone()));
+                    return Err(err);
+                }
+            };
+            debug!("[discord-rpc] Got auth code, exchanging for token...");
+
+            // Exchange code for access token
+            let client = reqwest::Client::new();
+            let token_response = client
+                .post("https://discord.com/api/oauth2/token")
+                .form(&[
+                    ("grant_type", "authorization_code"),
+                    ("code", code.as_str()),
+                    ("client_id", client_id),
+                    ("client_secret", client_secret),
+                    ("redirect_uri", redirect_uri),
+                ])
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !token_response.status().is_success() {
+                let status = token_response.status();
+                let body = token_response.text().await.unwrap_or_default();
+                let err = format!(
+                    "Token exchange failed ({}): {}. Ensure OAuth2 Redirect URI is exactly {} in your Discord app.",
+                    status, body, redirect_uri
+                );
                 let _ = ready_tx.send(Err(err.clone()));
                 return Err(err);
             }
-        };
-        debug!("[discord-rpc] Got auth code, exchanging for token...");
 
-        // Exchange code for access token
-        let client = reqwest::Client::new();
-        let token_response = client
-            .post("https://discord.com/api/oauth2/token")
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code.as_str()),
-                ("client_id", client_id),
-                ("client_secret", client_secret),
-                ("redirect_uri", redirect_uri),
-            ])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        if !token_response.status().is_success() {
-            let status = token_response.status();
-            let body = token_response.text().await.unwrap_or_default();
-            let err = format!(
-                "Token exchange failed ({}): {}. Ensure OAuth2 Redirect URI is exactly {} in your Discord app.",
-                status, body, redirect_uri
-            );
-            let _ = ready_tx.send(Err(err.clone()));
-            return Err(err);
-        }
-
-        let token_data: serde_json::Value = token_response.json().await.map_err(|e| e.to_string())?;
-        let access_token = match token_data.get("access_token").and_then(|v| v.as_str()) {
-            Some(t) => t.to_string(),
-            None => {
-                let err = "No access_token in response. Check that Redirect URI in OAuth2 matches exactly (e.g. https://localhost).".to_string();
-                let _ = ready_tx.send(Err(err.clone()));
-                return Err(err);
-            }
+            let token_data: serde_json::Value = token_response.json().await.map_err(|e| e.to_string())?;
+            let access_token = match token_data.get("access_token").and_then(|v| v.as_str()) {
+                Some(t) => t.to_string(),
+                None => {
+                    let err = "No access_token in response. Check that Redirect URI in OAuth2 matches exactly (e.g. https://localhost).".to_string();
+                    let _ = ready_tx.send(Err(err.clone()));
+                    return Err(err);
+                }
+            };
+            let refresh_token_to_save = token_data.get("refresh_token").and_then(|v| v.as_str()).map(String::from);
+            (access_token, refresh_token_to_save)
         };
 
         // AUTHENTICATE
@@ -410,6 +578,22 @@ impl DiscordRpcClient {
             .and_then(|v| v.as_str())
             .map(String::from);
 
+        // Fetch guild name via GET_GUILD (channel response only has guild_id)
+        let guild_name = if let Some(ref gid) = guild_id {
+            let nonce = Uuid::new_v4().to_string();
+            let get_guild_cmd = serde_json::json!({
+                "cmd": "GET_GUILD",
+                "nonce": nonce,
+                "args": { "guild_id": gid }
+            });
+            let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
+            state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+            let _ = write.send(Message::Text(get_guild_cmd.to_string())).await;
+            rx_oneshot.await.ok().and_then(|d| d.get("name").and_then(|v| v.as_str()).map(String::from))
+        } else {
+            None
+        };
+
         let mut user_labels = std::collections::HashMap::new();
         if let Some(states) = channel_response.get("voice_states").and_then(|v| v.as_array()) {
             for vs in states {
@@ -434,18 +618,19 @@ impl DiscordRpcClient {
             channel_id: channel_id.clone(),
             channel_name: channel_name.clone(),
             guild_id,
-            guild_name: None, // Would need GET_GUILD to fetch
+            guild_name: guild_name.clone(),
             self_user_id,
             user_labels,
         });
         info!(
-            "[discord-rpc] Channel info set: {} ({})",
+            "[discord-rpc] Channel info set: {} / {} ({})",
+            guild_name.as_deref().unwrap_or("?"),
             channel_name.as_deref().unwrap_or("?"),
             channel_id
         );
 
         // Signal ready BEFORE message loop - connect() is waiting
-        if ready_tx.send(Ok(())).is_err() {
+        if ready_tx.send(Ok(refresh_token_to_save)).is_err() {
             warn!("[discord-rpc] ready_tx already dropped");
         }
 
@@ -556,7 +741,8 @@ impl DiscordRpcClient {
         client_secret: &str,
         redirect_uri: &str,
         tx: mpsc::UnboundedSender<SpeakingEvent>,
-        ready_tx: tokio::sync::oneshot::Sender<Result<(), String>>,
+        ready_tx: tokio::sync::oneshot::Sender<Result<Option<String>, String>>,
+        access_token_override: Option<String>,
     ) -> Result<(), String> {
         let mut ready_tx = Some(ready_tx);
         let mut send_err = |e: String| {
@@ -603,60 +789,68 @@ impl DiscordRpcClient {
         }
 
         *state.connection_state.write().await = RpcConnectionState::AwaitingAuth;
-        info!("[discord-rpc] Sending AUTHORIZE (approve in Discord popup)...");
 
-        // AUTHORIZE
-        let nonce = Uuid::new_v4().to_string();
-        let auth_cmd = serde_json::json!({
-            "cmd": "AUTHORIZE",
-            "nonce": nonce,
-            "args": {
-                "client_id": client_id,
-                "scopes": ["rpc", "identify"]
+        let (access_token, refresh_token_to_save) = if let Some(access) = access_token_override {
+            info!("[discord-rpc] Using pre-obtained access token (IPC)");
+            (access, None)
+        } else {
+            info!("[discord-rpc] Sending AUTHORIZE (approve in Discord popup)...");
+
+            // AUTHORIZE
+            let nonce = Uuid::new_v4().to_string();
+            let auth_cmd = serde_json::json!({
+                "cmd": "AUTHORIZE",
+                "nonce": nonce,
+                "args": {
+                    "client_id": client_id,
+                    "scopes": ["rpc", "identify"]
+                }
+            });
+
+            ipc.send_json(&auth_cmd.to_string()).await?;
+            let auth_response = Self::ipc_read_response(&mut ipc, &nonce).await
+                .map_err(&mut send_err)?;
+            let code = match auth_response.get("code").and_then(|v| v.as_str()) {
+                Some(c) => c.to_string(),
+                None => {
+                    return Err(send_err("No authorization code. Did you approve in the Discord popup? If no popup appeared, check OAuth2 Redirect URI.".into()));
+                }
+            };
+            debug!("[discord-rpc] Got auth code, exchanging for token...");
+
+            // Exchange code for access token
+            let client = reqwest::Client::new();
+            let token_response = client
+                .post("https://discord.com/api/oauth2/token")
+                .form(&[
+                    ("grant_type", "authorization_code"),
+                    ("code", code.as_str()),
+                    ("client_id", client_id),
+                    ("client_secret", client_secret),
+                    ("redirect_uri", redirect_uri),
+                ])
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            if !token_response.status().is_success() {
+                let status = token_response.status();
+                let body = token_response.text().await.unwrap_or_default();
+                return Err(send_err(format!(
+                    "Token exchange failed ({}): {}. Ensure OAuth2 Redirect URI is exactly {} in your Discord app.",
+                    status, body, redirect_uri
+                )));
             }
-        });
 
-        ipc.send_json(&auth_cmd.to_string()).await?;
-        let auth_response = Self::ipc_read_response(&mut ipc, &nonce).await
-            .map_err(&mut send_err)?;
-        let code = match auth_response.get("code").and_then(|v| v.as_str()) {
-            Some(c) => c.to_string(),
-            None => {
-                return Err(send_err("No authorization code. Did you approve in the Discord popup? If no popup appeared, check OAuth2 Redirect URI.".into()));
-            }
-        };
-        debug!("[discord-rpc] Got auth code, exchanging for token...");
-
-        // Exchange code for access token
-        let client = reqwest::Client::new();
-        let token_response = client
-            .post("https://discord.com/api/oauth2/token")
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", code.as_str()),
-                ("client_id", client_id),
-                ("client_secret", client_secret),
-                ("redirect_uri", redirect_uri),
-            ])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-
-        if !token_response.status().is_success() {
-            let status = token_response.status();
-            let body = token_response.text().await.unwrap_or_default();
-            return Err(send_err(format!(
-                "Token exchange failed ({}): {}. Ensure OAuth2 Redirect URI is exactly {} in your Discord app.",
-                status, body, redirect_uri
-            )));
-        }
-
-        let token_data: serde_json::Value = token_response.json().await.map_err(|e| send_err(e.to_string()))?;
-        let access_token = match token_data.get("access_token").and_then(|v| v.as_str()) {
-            Some(t) => t.to_string(),
-            None => {
-                return Err(send_err("No access_token in response. Check that Redirect URI in OAuth2 matches exactly (e.g. https://localhost).".into()));
-            }
+            let token_data: serde_json::Value = token_response.json().await.map_err(|e| send_err(e.to_string()))?;
+            let access_token = match token_data.get("access_token").and_then(|v| v.as_str()) {
+                Some(t) => t.to_string(),
+                None => {
+                    return Err(send_err("No access_token in response. Check that Redirect URI in OAuth2 matches exactly (e.g. https://localhost).".into()));
+                }
+            };
+            let refresh_token_to_save = token_data.get("refresh_token").and_then(|v| v.as_str()).map(String::from);
+            (access_token, refresh_token_to_save)
         };
 
         // AUTHENTICATE
@@ -706,6 +900,22 @@ impl DiscordRpcClient {
             .and_then(|v| v.as_str())
             .map(String::from);
 
+        // Fetch guild name via GET_GUILD (channel response only has guild_id)
+        let guild_name = if let Some(ref gid) = guild_id {
+            let nonce = Uuid::new_v4().to_string();
+            let get_guild_cmd = serde_json::json!({
+                "cmd": "GET_GUILD",
+                "nonce": nonce,
+                "args": { "guild_id": gid }
+            });
+            ipc.send_json(&get_guild_cmd.to_string()).await?;
+            Self::ipc_read_response(&mut ipc, &nonce).await
+                .ok()
+                .and_then(|d| d.get("name").and_then(|v| v.as_str()).map(String::from))
+        } else {
+            None
+        };
+
         let mut user_labels = std::collections::HashMap::new();
         if let Some(states) = channel_response.get("voice_states").and_then(|v| v.as_array()) {
             for vs in states {
@@ -730,18 +940,19 @@ impl DiscordRpcClient {
             channel_id: channel_id.clone(),
             channel_name: channel_name.clone(),
             guild_id,
-            guild_name: None,
+            guild_name: guild_name.clone(),
             self_user_id,
             user_labels,
         });
         info!(
-            "[discord-rpc] Channel info set: {} ({})",
+            "[discord-rpc] Channel info set: {} / {} ({})",
+            guild_name.as_deref().unwrap_or("?"),
             channel_name.as_deref().unwrap_or("?"),
             channel_id
         );
 
         if let Some(tx) = ready_tx.take() {
-            if tx.send(Ok(())).is_err() {
+            if tx.send(Ok(refresh_token_to_save)).is_err() {
                 warn!("[discord-rpc] ready_tx already dropped");
             }
         }

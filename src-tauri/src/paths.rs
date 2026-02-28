@@ -17,6 +17,13 @@ pub fn projects_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Get the recent (auto-saved) projects directory.
+pub fn recent_projects_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = projects_dir(app)?.join("recent");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
 /// Get the models directory, creating it if necessary.
 pub fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app_data_dir(app)?.join("models");
@@ -28,6 +35,11 @@ pub fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
 #[allow(dead_code)]
 pub fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("settings.json"))
+}
+
+/// Get the path to the Discord tokens file (for refresh token persistence).
+pub fn discord_tokens_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("discord_tokens.json"))
 }
 
 /// Ensure all app directories exist.
