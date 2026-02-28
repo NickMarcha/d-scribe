@@ -2,7 +2,7 @@
 //! falls back to WebSocket on other platforms or if IPC fails.
 
 use crate::discord_rpc::events::{ChannelInfo, SpeakingEvent, VoiceChannel};
-use crate::discord_rpc::set_channel_info;
+use crate::discord_rpc::{clear_channel_info, set_channel_info};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use serde::Deserialize;
@@ -111,9 +111,13 @@ pub struct DiscordRpcClient {
     state: Arc<RpcLock>,
 }
 
+/// When we receive VOICE_CHANNEL_SELECT, we send GET_CHANNEL and wait for the response.
+/// (nonce we're waiting for, old channel_id to UNSUBSCRIBE from)
 struct RpcLock {
     connection_state: RwLock<RpcConnectionState>,
     pending: RwLock<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>,
+    channel_refresh: RwLock<Option<(String, Option<String>)>>,
+    current_channel_id: RwLock<Option<String>>,
 }
 
 impl DiscordRpcClient {
@@ -138,6 +142,8 @@ impl DiscordRpcClient {
             state: Arc::new(RpcLock {
                 connection_state: RwLock::new(RpcConnectionState::Disconnected),
                 pending: RwLock::new(HashMap::new()),
+                channel_refresh: RwLock::new(None),
+                current_channel_id: RwLock::new(None),
             }),
         }
     }
@@ -577,6 +583,10 @@ impl DiscordRpcClient {
             .get("guild_id")
             .and_then(|v| v.as_str())
             .map(String::from);
+        let channel_type = channel_response
+            .get("type")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u8);
 
         // Fetch guild name via GET_GUILD (channel response only has guild_id)
         let guild_name = if let Some(ref gid) = guild_id {
@@ -613,15 +623,20 @@ impl DiscordRpcClient {
                 }
             }
         }
+        if let Some(ref uid) = self_user_id {
+            user_labels.entry(uid.clone()).or_insert_with(|| uid.clone());
+        }
 
         set_channel_info(ChannelInfo {
             channel_id: channel_id.clone(),
             channel_name: channel_name.clone(),
+            channel_type,
             guild_id,
             guild_name: guild_name.clone(),
-            self_user_id,
+            self_user_id: self_user_id.clone(),
             user_labels,
         });
+        *state.current_channel_id.write().await = Some(channel_id.clone());
         info!(
             "[discord-rpc] Channel info set: {} / {} ({})",
             guild_name.as_deref().unwrap_or("?"),
@@ -632,6 +647,24 @@ impl DiscordRpcClient {
         // Signal ready BEFORE message loop - connect() is waiting
         if ready_tx.send(Ok(refresh_token_to_save)).is_err() {
             warn!("[discord-rpc] ready_tx already dropped");
+        }
+
+        // SUBSCRIBE to VOICE_CHANNEL_SELECT (refresh when user switches channels)
+        {
+            let nonce = Uuid::new_v4().to_string();
+            let sub_cmd = serde_json::json!({
+                "cmd": "SUBSCRIBE",
+                "nonce": nonce,
+                "evt": "VOICE_CHANNEL_SELECT",
+                "args": {}
+            });
+            let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
+            state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+            write
+                .send(Message::Text(sub_cmd.to_string()))
+                .await
+                .map_err(|e| e.to_string())?;
+            let _ = rx_oneshot.await;
         }
 
         // SUBSCRIBE to SPEAKING_START and SPEAKING_STOP
@@ -665,10 +698,156 @@ impl DiscordRpcClient {
                     let data = payload.data.clone();
 
                     if let Some(nonce) = &payload.nonce {
+                        // Check if this is our channel refresh response
+                        if let Some((wait_nonce, old_ch_id)) =
+                            state.channel_refresh.write().await.take()
+                        {
+                            if nonce.as_str() == wait_nonce {
+                                if let Some(ref d) = data {
+                                    if let Some(channel_response) = d.as_object() {
+                                        if let Some(new_id) =
+                                            channel_response.get("id").and_then(|v| v.as_str())
+                                        {
+                                            let new_channel_id = new_id.to_string();
+                                            let channel_name = channel_response
+                                                .get("name")
+                                                .and_then(|v| v.as_str())
+                                                .map(String::from);
+                                            let guild_id = channel_response
+                                                .get("guild_id")
+                                                .and_then(|v| v.as_str())
+                                                .map(String::from);
+                                            let channel_type = channel_response
+                                                .get("type")
+                                                .and_then(|v| v.as_u64())
+                                                .map(|n| n as u8);
+                                            // Skip GET_GUILD in refresh to avoid blocking the message loop
+                                            let guild_name: Option<String> = None;
+                                            let mut user_labels =
+                                                std::collections::HashMap::new();
+                                            if let Some(states) = channel_response
+                                                .get("voice_states")
+                                                .and_then(|v| v.as_array())
+                                            {
+                                                for vs in states {
+                                                    let user = vs.get("user");
+                                                    let uid = user
+                                                        .and_then(|u| u.get("id"))
+                                                        .and_then(|v| v.as_str())
+                                                        .map(String::from);
+                                                    let username = user
+                                                        .and_then(|u| u.get("username"))
+                                                        .and_then(|v| v.as_str())
+                                                        .map(String::from);
+                                                    let nick = vs
+                                                        .get("nick")
+                                                        .and_then(|v| v.as_str())
+                                                        .map(String::from);
+                                                    if let Some(uid) = uid {
+                                                        let label = nick
+                                                            .or(username)
+                                                            .unwrap_or_else(|| uid.clone());
+                                                        user_labels.insert(uid, label);
+                                                    }
+                                                }
+                                            }
+                                            if let Some(ref uid) = self_user_id {
+                                                user_labels
+                                                    .entry(uid.clone())
+                                                    .or_insert_with(|| uid.clone());
+                                            }
+                                            set_channel_info(ChannelInfo {
+                                                channel_id: new_channel_id.clone(),
+                                                channel_name: channel_name.clone(),
+                                                channel_type,
+                                                guild_id,
+                                                guild_name: guild_name.clone(),
+                                                self_user_id: self_user_id.clone(),
+                                                user_labels,
+                                            });
+                                            *state.current_channel_id.write().await =
+                                                Some(new_channel_id.clone());
+                                            info!(
+                                                "[discord-rpc] Channel refreshed: {} / {} ({})",
+                                                guild_name.as_deref().unwrap_or("?"),
+                                                channel_name.as_deref().unwrap_or("?"),
+                                                new_channel_id
+                                            );
+                                            // UNSUBSCRIBE old, SUBSCRIBE new for SPEAKING
+                                            if let Some(old_id) = old_ch_id {
+                                                for evt in ["SPEAKING_START", "SPEAKING_STOP"] {
+                                                    let unsub = serde_json::json!({
+                                                        "cmd": "UNSUBSCRIBE",
+                                                        "nonce": Uuid::new_v4().to_string(),
+                                                        "evt": evt,
+                                                        "args": { "channel_id": old_id }
+                                                    });
+                                                    let _ = write
+                                                        .send(Message::Text(
+                                                            unsub.to_string(),
+                                                        ))
+                                                        .await;
+                                                }
+                                            }
+                                            for evt in ["SPEAKING_START", "SPEAKING_STOP"] {
+                                                let snonce = Uuid::new_v4().to_string();
+                                                let sub_cmd = serde_json::json!({
+                                                    "cmd": "SUBSCRIBE",
+                                                    "nonce": snonce,
+                                                    "evt": evt,
+                                                    "args": { "channel_id": new_channel_id }
+                                                });
+                                                let (stx, srx) =
+                                                    tokio::sync::oneshot::channel();
+                                                state.pending.write().await
+                                                    .insert(snonce.clone(), stx);
+                                                let _ = write
+                                                    .send(Message::Text(
+                                                        sub_cmd.to_string(),
+                                                    ))
+                                                    .await;
+                                                let _ = srx.await;
+                                            }
+                                        }
+                                    }
+                                }
+                                continue;
+                            } else {
+                                *state.channel_refresh.write().await =
+                                    Some((wait_nonce, old_ch_id));
+                            }
+                        }
                         if let Some(tx) = state.pending.write().await.remove(nonce) {
                             if let Some(ref d) = data {
                                 let _ = tx.send(d.clone());
                             }
+                        }
+                    }
+                    if evt == Some("VOICE_CHANNEL_SELECT") {
+                        let ch_id = data
+                            .as_ref()
+                            .and_then(|d| d.get("channel_id"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        if ch_id.is_none() {
+                            clear_channel_info();
+                            *state.current_channel_id.write().await = None;
+                            info!("[discord-rpc] User left voice channel");
+                        } else if let Some(new_ch_id) = ch_id {
+                            let old_ch_id =
+                                state.current_channel_id.read().await.clone();
+                            let nonce = Uuid::new_v4().to_string();
+                            let get_channel_cmd = serde_json::json!({
+                                "cmd": "GET_CHANNEL",
+                                "nonce": nonce,
+                                "args": { "channel_id": new_ch_id }
+                            });
+                            *state.channel_refresh.write().await =
+                                Some((nonce.clone(), old_ch_id));
+                            write
+                                .send(Message::Text(get_channel_cmd.to_string()))
+                                .await
+                                .map_err(|e| e.to_string())?;
                         }
                     }
                     if evt == Some("SPEAKING_START") || evt == Some("SPEAKING_STOP") {
@@ -899,6 +1078,10 @@ impl DiscordRpcClient {
             .get("guild_id")
             .and_then(|v| v.as_str())
             .map(String::from);
+        let channel_type = channel_response
+            .get("type")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u8);
 
         // Fetch guild name via GET_GUILD (channel response only has guild_id)
         let guild_name = if let Some(ref gid) = guild_id {
@@ -935,15 +1118,20 @@ impl DiscordRpcClient {
                 }
             }
         }
+        if let Some(ref uid) = self_user_id {
+            user_labels.entry(uid.clone()).or_insert_with(|| uid.clone());
+        }
 
         set_channel_info(ChannelInfo {
             channel_id: channel_id.clone(),
             channel_name: channel_name.clone(),
+            channel_type,
             guild_id,
             guild_name: guild_name.clone(),
-            self_user_id,
+            self_user_id: self_user_id.clone(),
             user_labels,
         });
+        *state.current_channel_id.write().await = Some(channel_id.clone());
         info!(
             "[discord-rpc] Channel info set: {} / {} ({})",
             guild_name.as_deref().unwrap_or("?"),
@@ -955,6 +1143,19 @@ impl DiscordRpcClient {
             if tx.send(Ok(refresh_token_to_save)).is_err() {
                 warn!("[discord-rpc] ready_tx already dropped");
             }
+        }
+
+        // SUBSCRIBE to VOICE_CHANNEL_SELECT (refresh when user switches channels)
+        {
+            let nonce = Uuid::new_v4().to_string();
+            let sub_cmd = serde_json::json!({
+                "cmd": "SUBSCRIBE",
+                "nonce": nonce,
+                "evt": "VOICE_CHANNEL_SELECT",
+                "args": {}
+            });
+            ipc.send_json(&sub_cmd.to_string()).await?;
+            let _ = Self::ipc_read_response(&mut ipc, &nonce).await?;
         }
 
         // SUBSCRIBE to SPEAKING_START and SPEAKING_STOP
@@ -985,10 +1186,140 @@ impl DiscordRpcClient {
                         let data = payload.data.clone();
 
                         if let Some(nonce) = &payload.nonce {
+                            if let Some((wait_nonce, old_ch_id)) =
+                                state.channel_refresh.write().await.take()
+                            {
+                                if nonce.as_str() == wait_nonce {
+                                    if let Some(ref d) = data {
+                                        if let Some(channel_response) = d.as_object() {
+                                            if let Some(new_id) =
+                                                channel_response.get("id").and_then(|v| v.as_str())
+                                            {
+                                                let new_channel_id = new_id.to_string();
+                                                let channel_name = channel_response
+                                                    .get("name")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(String::from);
+                                                let guild_id = channel_response
+                                                    .get("guild_id")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(String::from);
+                                                let channel_type = channel_response
+                                                    .get("type")
+                                                    .and_then(|v| v.as_u64())
+                                                    .map(|n| n as u8);
+                                                let guild_name: Option<String> = None;
+                                                let mut user_labels =
+                                                    std::collections::HashMap::new();
+                                                if let Some(states) = channel_response
+                                                    .get("voice_states")
+                                                    .and_then(|v| v.as_array())
+                                                {
+                                                    for vs in states {
+                                                        let user = vs.get("user");
+                                                        let uid = user
+                                                            .and_then(|u| u.get("id"))
+                                                            .and_then(|v| v.as_str())
+                                                            .map(String::from);
+                                                        let username = user
+                                                            .and_then(|u| u.get("username"))
+                                                            .and_then(|v| v.as_str())
+                                                            .map(String::from);
+                                                        let nick = vs
+                                                            .get("nick")
+                                                            .and_then(|v| v.as_str())
+                                                            .map(String::from);
+                                                        if let Some(uid) = uid {
+                                                            let label = nick
+                                                                .or(username)
+                                                                .unwrap_or_else(|| uid.clone());
+                                                            user_labels.insert(uid, label);
+                                                        }
+                                                    }
+                                                }
+                                                if let Some(ref uid) = self_user_id {
+                                                    user_labels
+                                                        .entry(uid.clone())
+                                                        .or_insert_with(|| uid.clone());
+                                                }
+                                                set_channel_info(ChannelInfo {
+                                                    channel_id: new_channel_id.clone(),
+                                                    channel_name: channel_name.clone(),
+                                                    channel_type,
+                                                    guild_id,
+                                                    guild_name: guild_name.clone(),
+                                                    self_user_id: self_user_id.clone(),
+                                                    user_labels,
+                                                });
+                                                *state.current_channel_id.write().await =
+                                                    Some(new_channel_id.clone());
+                                                info!(
+                                                    "[discord-rpc] Channel refreshed (IPC): {} / {} ({})",
+                                                    guild_name.as_deref().unwrap_or("?"),
+                                                    channel_name.as_deref().unwrap_or("?"),
+                                                    new_channel_id
+                                                );
+                                                if let Some(old_id) = old_ch_id {
+                                                    for evt in ["SPEAKING_START", "SPEAKING_STOP"] {
+                                                        let unsub = serde_json::json!({
+                                                            "cmd": "UNSUBSCRIBE",
+                                                            "nonce": Uuid::new_v4().to_string(),
+                                                            "evt": evt,
+                                                            "args": { "channel_id": old_id }
+                                                        });
+                                                        let _ = ipc
+                                                            .send_json(&unsub.to_string())
+                                                            .await;
+                                                    }
+                                                }
+                                                for evt in ["SPEAKING_START", "SPEAKING_STOP"] {
+                                                    let snonce = Uuid::new_v4().to_string();
+                                                    let sub_cmd = serde_json::json!({
+                                                        "cmd": "SUBSCRIBE",
+                                                        "nonce": snonce,
+                                                        "evt": evt,
+                                                        "args": { "channel_id": new_channel_id }
+                                                    });
+                                                    ipc.send_json(&sub_cmd.to_string()).await?;
+                                                    let _ = Self::ipc_read_response(&mut ipc, &snonce).await?;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    continue;
+                                } else {
+                                    *state.channel_refresh.write().await =
+                                        Some((wait_nonce, old_ch_id));
+                                }
+                            }
                             if let Some(tx) = state.pending.write().await.remove(nonce) {
                                 if let Some(ref d) = data {
                                     let _ = tx.send(d.clone());
                                 }
+                            }
+                        }
+                        if evt == Some("VOICE_CHANNEL_SELECT") {
+                            let ch_id = data
+                                .as_ref()
+                                .and_then(|d| d.get("channel_id"))
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
+                            if ch_id.is_none() {
+                                clear_channel_info();
+                                *state.current_channel_id.write().await = None;
+                                info!("[discord-rpc] User left voice channel (IPC)");
+                            } else if let Some(new_ch_id) = ch_id {
+                                let old_ch_id =
+                                    state.current_channel_id.read().await.clone();
+                                let nonce = Uuid::new_v4().to_string();
+                                let get_channel_cmd = serde_json::json!({
+                                    "cmd": "GET_CHANNEL",
+                                    "nonce": nonce,
+                                    "args": { "channel_id": new_ch_id }
+                                });
+                                *state.channel_refresh.write().await =
+                                    Some((nonce.clone(), old_ch_id));
+                                ipc.send_json(&get_channel_cmd.to_string()).await?;
                             }
                         }
                         if evt == Some("SPEAKING_START") || evt == Some("SPEAKING_STOP") {

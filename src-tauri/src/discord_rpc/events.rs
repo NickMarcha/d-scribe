@@ -46,10 +46,12 @@ pub struct AuthenticatedUser {
 }
 
 /// Channel info from GET_SELECTED_VOICE_CHANNEL, stored for session start.
+/// channel_type: Discord channel type (1=dm, 2=guild_voice, 3=group_dm)
 #[derive(Debug, Clone)]
 pub struct ChannelInfo {
     pub channel_id: String,
     pub channel_name: Option<String>,
+    pub channel_type: Option<u8>,
     pub guild_id: Option<String>,
     pub guild_name: Option<String>,
     pub self_user_id: Option<String>,

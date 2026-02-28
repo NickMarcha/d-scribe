@@ -23,6 +23,10 @@ pub fn set_channel_info(info: ChannelInfo) {
     *CHANNEL_INFO.lock().unwrap() = Some(info);
 }
 
+pub fn clear_channel_info() {
+    *CHANNEL_INFO.lock().unwrap() = None;
+}
+
 pub fn get_channel_info() -> Option<ChannelInfo> {
     CHANNEL_INFO.lock().unwrap().clone()
 }

@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { load } from "@tauri-apps/plugin-store";
+import { StatsPanel } from "./StatsPanel";
 import "./Session.css";
 
 interface SessionSegment {
@@ -15,8 +17,13 @@ interface SessionState {
   session_id: string;
   created_at: number;
   guild_name: string | null;
+  guild_id: string | null;
   channel_name: string | null;
   channel_id: string | null;
+  channel_type?: number; // 1=dm, 2=guild_voice, 3=group_dm
+  live_mode_enabled?: boolean;
+  self_user_id: string | null;
+  user_labels?: Record<string, string>;
   segments: SessionSegment[];
   transcript_texts: string[];
   audio_paths: { loopback: string | null; microphone: string | null };
@@ -47,6 +54,9 @@ export function Session() {
   const [remoteVolume, setRemoteVolume] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null);
+  const [liveSegments, setLiveSegments] = useState<SessionSegment[]>([]);
+  const [liveTexts, setLiveTexts] = useState<string[]>([]);
+  const [statsCollapsed, setStatsCollapsed] = useState(false);
   const audioRemoteRef = useRef<HTMLAudioElement | null>(null);
   const audioLocalRef = useRef<HTMLAudioElement | null>(null);
   const segmentRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -92,6 +102,11 @@ export function Session() {
         if (tpl) setProjectNameTemplate(tpl);
         const pm = await store.get<string>("playback_mode");
         if (pm === "remote" || pm === "local" || pm === "both") setPlaybackMode(pm);
+        const tmode = await store.get<string>("transcription_mode");
+        setTranscriptionMode(tmode === "remote" ? "remote" : "integrated");
+        setRemoteBaseUrl((await store.get<string>("remote_base_url")) || "");
+        setRemoteModel((await store.get<string>("remote_model")) || "");
+        setRemoteApiKey((await store.get<string>("remote_api_key")) || "");
       } catch {
         /* ignore */
       }
@@ -110,7 +125,18 @@ export function Session() {
     })();
   }, [playbackMode]);
 
-  async function startRecording() {
+  async function startRecording(liveRealtime = false) {
+    if (liveRealtime) {
+      const useRemote = transcriptionMode === "remote" && remoteBaseUrl.trim() && remoteModel.trim();
+      if (!useRemote && !modelPath) {
+        setStatus("Download a model first (Settings) for live transcription.");
+        return;
+      }
+      if (transcriptionMode === "remote" && (!remoteBaseUrl.trim() || !remoteModel.trim())) {
+        setStatus("Configure remote API URL and model in Settings for live transcription.");
+        return;
+      }
+    }
     setStatus("Starting...");
     try {
       const [projectsPath, channelInfo] = await Promise.all([
@@ -132,16 +158,27 @@ export function Session() {
       const store = await load("settings.json", { defaults: {}, autoSave: true });
       const bufferMs = (await store.get<number>("segment_merge_buffer_ms")) ?? 1000;
 
-      await invoke("start_recording", {
+      const args: Record<string, unknown> = {
         outputPath: loopbackPath,
         micPath,
         segmentMergeBufferMs: bufferMs,
         projectNameTemplate: projectNameTemplate,
-      });
+        liveRealtime,
+      };
+      if (liveRealtime) {
+        args.liveModelPath = modelPath || null;
+        args.liveTranscriptionMode = transcriptionMode;
+        args.liveRemoteBaseUrl = transcriptionMode === "remote" ? remoteBaseUrl : null;
+        args.liveRemoteModel = transcriptionMode === "remote" ? remoteModel : null;
+        args.liveRemoteApiKey = transcriptionMode === "remote" && remoteApiKey.trim() ? remoteApiKey : null;
+      }
+      await invoke("start_recording", args);
       setRecording(true);
       setSession(null);
       setCurrentProjectPath(null);
-      setStatus("Recording... Join a voice channel and speak.");
+      setLiveSegments([]);
+      setLiveTexts([]);
+      setStatus(liveRealtime ? "Recording (live)... Transcriptions will appear as you speak." : "Recording... Join a voice channel and speak.");
     } catch (e) {
       setStatus(`Failed to start: ${e}`);
     }
@@ -246,11 +283,20 @@ export function Session() {
   const [transcribing, setTranscribing] = useState(false);
   const [modelPath, setModelPath] = useState("");
   const [modelName, setModelName] = useState("base.en");
+  const [transcriptionMode, setTranscriptionMode] = useState<"integrated" | "remote">("integrated");
+  const [remoteBaseUrl, setRemoteBaseUrl] = useState("");
+  const [remoteModel, setRemoteModel] = useState("");
+  const [remoteApiKey, setRemoteApiKey] = useState("");
 
   async function transcribeSession() {
     if (!session) return;
-    if (!modelPath) {
+    const useRemote = transcriptionMode === "remote" && remoteBaseUrl.trim() && remoteModel.trim();
+    if (!useRemote && !modelPath) {
       setStatus("Download a model first (Settings) or set model path.");
+      return;
+    }
+    if (useRemote && (!remoteBaseUrl.trim() || !remoteModel.trim())) {
+      setStatus("Configure remote API URL and model in Settings.");
       return;
     }
     setTranscribing(true);
@@ -258,7 +304,11 @@ export function Session() {
     try {
       const newState = await invoke<SessionState>("transcribe_session_command", {
         state: session,
-        modelPath,
+        modelPath: useRemote ? null : modelPath,
+        transcriptionMode,
+        remoteBaseUrl: useRemote ? remoteBaseUrl : null,
+        remoteModel: useRemote ? remoteModel : null,
+        remoteApiKey: remoteApiKey.trim() || null,
       });
       setSession(newState);
       setStatus("Transcription complete.");
@@ -276,7 +326,8 @@ export function Session() {
       setModelPath(path);
       setStatus(`Model downloaded to ${path}`);
     } catch (e) {
-      setStatus(`Download failed: ${e}`);
+      const msg = String(e);
+      setStatus(msg.includes("coming soon") ? "large-v3-turbo: coming soon" : `Download failed: ${e}`);
     }
   }
 
@@ -303,8 +354,8 @@ export function Session() {
     }
   }
 
-  const texts = session?.transcript_texts ?? [];
-  const segments = session?.segments ?? [];
+  const segments = recording ? liveSegments : (session?.segments ?? []);
+  const texts = recording ? liveTexts : (session?.transcript_texts ?? []);
 
   const playAudio = useCallback(
     (modeOverride?: "remote" | "local" | "both") => {
@@ -404,6 +455,31 @@ export function Session() {
     }
   }, [remoteVolume, localVolume, playbackMode, isPlaying]);
 
+  useEffect(() => {
+    if (!recording) return;
+    const unlisten = listen<{ segment: SessionSegment; text: string; index: number }>(
+      "transcript-segment",
+      (evt) => {
+        const { segment, text, index } = evt.payload;
+        setLiveSegments((prev) => {
+          const next = [...prev];
+          while (next.length <= index) next.push(segment);
+          next[index] = segment;
+          return next;
+        });
+        setLiveTexts((prev) => {
+          const next = [...prev];
+          while (next.length <= index) next.push("");
+          next[index] = text;
+          return next;
+        });
+      }
+    );
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [recording]);
+
   return (
     <div className="session">
       <h2>Session</h2>
@@ -461,13 +537,33 @@ export function Session() {
             </div>
           )}
           <div className="button-row">
-            <button type="button" onClick={startRecording}>
+            <button type="button" onClick={() => startRecording(false)}>
               Start Recording
+            </button>
+            <button
+              type="button"
+              onClick={() => startRecording(true)}
+              disabled={
+                (transcriptionMode === "integrated" && !modelPath) ||
+                (transcriptionMode === "remote" && (!remoteBaseUrl.trim() || !remoteModel.trim()))
+              }
+              title={
+                transcriptionMode === "integrated" && !modelPath
+                  ? "Download a model first (Settings) for live transcription"
+                  : transcriptionMode === "remote" && (!remoteBaseUrl.trim() || !remoteModel.trim())
+                    ? "Configure remote API URL and model in Settings for live transcription"
+                    : "Transcribe in real time as you speak (requires model or remote API)"
+              }
+            >
+              Start Recording (Live)
             </button>
             <button type="button" onClick={loadProject}>
               Open Project
             </button>
           </div>
+          <p className="field-hint" style={{ marginTop: "0.5rem" }}>
+            Live = real-time transcription as you speak. Configure model or remote API in Settings first.
+          </p>
         </div>
       )}
 
@@ -480,14 +576,33 @@ export function Session() {
         </div>
       )}
 
-      {session && !recording && (
+      {(session || recording) && (
         <div className="session-transcript">
+          <div className="session-two-column">
+            <StatsPanel
+              segments={segments}
+              texts={texts}
+              collapsed={statsCollapsed}
+              onToggleCollapsed={() => setStatsCollapsed(!statsCollapsed)}
+            />
+            <div className="transcript-scroll-column">
           <div className="transcript-meta">
             <span>
-              {session.guild_name ?? "Unknown"} / {session.channel_name ?? "Unknown"}
+              {recording
+                ? "Live recording"
+                : `${session?.guild_name ?? "Unknown"} / ${session?.channel_name ?? "Unknown"}`}
+              {session?.channel_type != null && (
+                <span className="meta-badge">
+                  {session.channel_type === 1 ? "DM" : session.channel_type === 2 ? "Server" : session.channel_type === 3 ? "Group DM" : ""}
+                </span>
+              )}
+              {session?.live_mode_enabled && (
+                <span className="meta-badge">Live</span>
+              )}
             </span>
           </div>
 
+          {session && (
           <div className="playback-controls">
             <div className="playback-buttons">
               <button
@@ -551,24 +666,29 @@ export function Session() {
               </label>
             </div>
           </div>
+          )}
 
-          <audio
-            ref={audioRemoteRef}
-            onTimeUpdate={handleTimeUpdate}
-            onEnded={() => {
-              if (playbackMode === "both") pauseAudio();
-              else setIsPlaying(false);
-            }}
-          />
-          <audio
-            ref={audioLocalRef}
-            onTimeUpdate={handleTimeUpdate}
-            onEnded={() => {
-              if (playbackMode === "both") pauseAudio();
-              else setIsPlaying(false);
-            }}
-          />
-          <div className="segments-list">
+          {session && (
+            <>
+              <audio
+                ref={audioRemoteRef}
+                onTimeUpdate={handleTimeUpdate}
+                onEnded={() => {
+                  if (playbackMode === "both") pauseAudio();
+                  else setIsPlaying(false);
+                }}
+              />
+              <audio
+                ref={audioLocalRef}
+                onTimeUpdate={handleTimeUpdate}
+                onEnded={() => {
+                  if (playbackMode === "both") pauseAudio();
+                  else setIsPlaying(false);
+                }}
+              />
+            </>
+          )}
+          <div className="segments-list scrollable">
             {segments.map((seg, i) => (
               <div
                 key={i}
@@ -593,29 +713,52 @@ export function Session() {
               </div>
             ))}
           </div>
+            </div>
+          </div>
 
           <div className="transcribe-section">
             <label>Transcription: </label>
-            <select
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              disabled={transcribing}
-            >
-              <option value="tiny.en">tiny.en</option>
-              <option value="base.en">base.en</option>
-              <option value="small.en">small.en</option>
-            </select>
-            <button
-              type="button"
-              onClick={downloadModel}
-              disabled={transcribing}
-            >
-              Download Model
-            </button>
+            {transcriptionMode === "integrated" && (
+              <>
+                <select
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                  disabled={transcribing}
+                >
+                  <optgroup label="English">
+                    <option value="tiny.en">tiny.en</option>
+                    <option value="base.en">base.en</option>
+                    <option value="small.en">small.en</option>
+                    <option value="medium.en">medium.en</option>
+                  </optgroup>
+                  <optgroup label="Multilingual">
+                    <option value="tiny">tiny</option>
+                    <option value="base">base</option>
+                    <option value="small">small</option>
+                    <option value="medium">medium</option>
+                    <option value="large-v3">large-v3 (recommended)</option>
+                    <option value="large-v3-turbo">large-v3-turbo (faster)</option>
+                  </optgroup>
+                </select>
+                <button
+                  type="button"
+                  onClick={downloadModel}
+                  disabled={transcribing}
+                >
+                  Download Model
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={transcribeSession}
-              disabled={transcribing || !modelPath}
+              disabled={
+                transcribing ||
+                recording ||
+                !session ||
+                (transcriptionMode === "integrated" && !modelPath) ||
+                (transcriptionMode === "remote" && (!remoteBaseUrl.trim() || !remoteModel.trim()))
+              }
             >
               {transcribing ? "Transcribing..." : "Transcribe"}
             </button>

@@ -42,10 +42,18 @@ pub fn discord_tokens_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("discord_tokens.json"))
 }
 
+/// Get the log file path (e.g. %APPDATA%/d-scribe/logs/d-scribe.log on Windows).
+pub fn log_file_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app_data_dir(app)?.join("logs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("d-scribe.log"))
+}
+
 /// Ensure all app directories exist.
 pub fn ensure_directories(app: &AppHandle) -> Result<(), String> {
     app_data_dir(app)?;
     projects_dir(app)?;
     models_dir(app)?;
+    let _ = log_file_path(app);
     Ok(())
 }

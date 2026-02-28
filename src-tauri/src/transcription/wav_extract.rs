@@ -3,6 +3,25 @@
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use std::path::Path;
 
+/// Write raw samples to a WAV file. 16 kHz mono 16-bit.
+pub fn write_wav_from_samples(path: &Path, samples: &[i16]) -> Result<(), String> {
+    let mut writer = WavWriter::create(
+        path,
+        WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        },
+    )
+    .map_err(|e| e.to_string())?;
+    for &s in samples {
+        writer.write_sample(s).map_err(|e| e.to_string())?;
+    }
+    writer.finalize().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Extract samples from start_ms to end_ms (inclusive of start, exclusive of end)
 /// and write to output_path.
 /// Assumes 16 kHz mono 16-bit PCM input.

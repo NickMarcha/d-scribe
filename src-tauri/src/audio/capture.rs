@@ -1,9 +1,10 @@
 //! Windows WASAPI audio capture for loopback and microphone.
 
+use super::buffer::AudioBuffer;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 const SAMPLE_RATE: u32 = 16000;
@@ -17,9 +18,12 @@ pub struct AudioCaptureHandle {
 /// Start capturing audio from loopback (system output) and microphone.
 /// Writes to two WAV files: output_path (loopback) and mic_path (microphone).
 /// Format: 16 kHz, mono, 16-bit PCM (whisper.cpp requirement).
+/// When live_realtime is true, also pushes samples to the provided buffers for real-time transcription.
 pub fn start_audio_capture(
     output_path: &Path,
     mic_path: &Path,
+    loopback_buffer: Option<Arc<Mutex<AudioBuffer>>>,
+    mic_buffer: Option<Arc<Mutex<AudioBuffer>>>,
 ) -> Result<AudioCaptureHandle, String> {
     let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -29,16 +33,15 @@ pub fn start_audio_capture(
     let stop_mic = stop_flag.clone();
 
     // Loopback: capture from render device with Direction::Capture = system output
-    // (WASAPI uses loopback when capturing from a render endpoint)
     thread::spawn(move || {
-        if let Err(e) = run_loopback_capture(&out_path, &stop_loopback) {
+        if let Err(e) = run_loopback_capture(&out_path, &stop_loopback, loopback_buffer) {
             eprintln!("Loopback capture error: {}", e);
         }
     });
 
     // Microphone: capture from default capture device
     thread::spawn(move || {
-        if let Err(e) = run_mic_capture(&mic_path_buf, &stop_mic) {
+        if let Err(e) = run_mic_capture(&mic_path_buf, &stop_mic, mic_buffer) {
             eprintln!("Mic capture error: {}", e);
         }
     });
@@ -52,22 +55,29 @@ pub fn stop_audio_capture(handle: AudioCaptureHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn run_loopback_capture(output_path: &Path, stop_flag: &AtomicBool) -> Result<(), String> {
+fn run_loopback_capture(
+    output_path: &Path,
+    stop_flag: &AtomicBool,
+    buffer: Option<Arc<Mutex<AudioBuffer>>>,
+) -> Result<(), String> {
     let _ = wasapi::initialize_mta().ok();
 
     let enumerator = wasapi::DeviceEnumerator::new().map_err(|e| e.to_string())?;
-    // Direction::Render = playback device, Capture on it = loopback
     let device = enumerator
         .get_default_device(&wasapi::Direction::Render)
         .map_err(|e| e.to_string())?;
 
-    capture_to_wav(device, output_path, stop_flag)?;
+    capture_to_wav(device, output_path, stop_flag, buffer)?;
 
     wasapi::deinitialize();
     Ok(())
 }
 
-fn run_mic_capture(mic_path: &Path, stop_flag: &AtomicBool) -> Result<(), String> {
+fn run_mic_capture(
+    mic_path: &Path,
+    stop_flag: &AtomicBool,
+    buffer: Option<Arc<Mutex<AudioBuffer>>>,
+) -> Result<(), String> {
     let _ = wasapi::initialize_mta().ok();
 
     let enumerator = wasapi::DeviceEnumerator::new().map_err(|e| e.to_string())?;
@@ -75,7 +85,7 @@ fn run_mic_capture(mic_path: &Path, stop_flag: &AtomicBool) -> Result<(), String
         .get_default_device(&wasapi::Direction::Capture)
         .map_err(|e| e.to_string())?;
 
-    capture_to_wav(device, mic_path, stop_flag)?;
+    capture_to_wav(device, mic_path, stop_flag, buffer)?;
 
     wasapi::deinitialize();
     Ok(())
@@ -85,6 +95,7 @@ fn capture_to_wav(
     device: wasapi::Device,
     path: &Path,
     stop_flag: &AtomicBool,
+    buffer: Option<Arc<Mutex<AudioBuffer>>>,
 ) -> Result<(), String> {
     let mut audio_client = device.get_iaudioclient().map_err(|e| e.to_string())?;
 
@@ -142,6 +153,11 @@ fn capture_to_wav(
             let high = sample_queue.pop_front().unwrap();
             let sample = i16::from_le_bytes([low, high]);
             writer.write_sample(sample).map_err(|e| e.to_string())?;
+            if let Some(ref buf) = buffer {
+                if let Ok(mut guard) = buf.lock() {
+                    guard.push(sample);
+                }
+            }
         }
 
         if h_event.wait_for_event(1000).is_err() {

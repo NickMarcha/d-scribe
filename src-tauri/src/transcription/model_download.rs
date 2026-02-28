@@ -15,6 +15,7 @@ pub const MODELS: &[(&str, &str)] = &[
     ("ggml-medium.en.bin", "medium.en"),
     ("ggml-medium.bin", "medium"),
     ("ggml-large-v3.bin", "large-v3"),
+    ("ggml-large-v3-turbo.bin", "large-v3-turbo"),
 ];
 
 /// Download a model file to the models directory.
@@ -37,6 +38,9 @@ pub async fn download_model(models_dir: &Path, model_name: &str) -> Result<Strin
         .map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
+        if model_name == "large-v3-turbo" {
+            return Err("large-v3-turbo: coming soon (model may not be available yet)".to_string());
+        }
         return Err(format!(
             "Download failed: {}",
             response.status()

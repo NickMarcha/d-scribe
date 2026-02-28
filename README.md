@@ -95,6 +95,17 @@ d-scribe/
 npm run tauri build
 ```
 
+## Troubleshooting
+
+**Enable debug logging** (to diagnose Discord RPC, transcription, etc.):
+
+- **PowerShell:** `$env:RUST_LOG="d_scribe=debug,wasapi=warn"; npm run tauri dev`
+- **Cmd:** `set RUST_LOG=d_scribe=debug,wasapi=warn && npm run tauri dev`
+
+(Plain `RUST_LOG=debug` floods the terminal with WASAPI trace logs.)
+
+**Zero segments after recording:** Segmentation comes from Discord RPC speaking events. Ensure you're connected in Settings and in the voice channel before recording. If you get 0 segments, the RPC subscription or connection may need debugging.
+
 ## Planned Features
 
 - **AI summary** – Generate summaries of transcripts using AI/LLM

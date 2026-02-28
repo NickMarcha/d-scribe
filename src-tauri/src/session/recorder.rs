@@ -5,6 +5,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+lazy_static::lazy_static! {
+    pub static ref SEGMENT_FLUSH_TX: Mutex<Option<tokio::sync::mpsc::UnboundedSender<SessionSegment>>> = Mutex::new(None);
+}
+
 /// Generate session/project name from template.
 /// Placeholders: {guild}, {channel}, {timestamp}, {date}, {time}
 fn format_session_id(
@@ -42,9 +46,17 @@ pub struct SessionState {
     pub session_id: String,
     pub created_at: u64,
     pub guild_name: Option<String>,
+    pub guild_id: Option<String>,
     pub channel_name: Option<String>,
     pub channel_id: Option<String>,
+    /// Discord channel type: 1=dm, 2=guild_voice, 3=group_dm
+    #[serde(default)]
+    pub channel_type: Option<u8>,
+    #[serde(default)]
+    pub live_mode_enabled: bool,
     pub self_user_id: Option<String>,
+    #[serde(default)]
+    pub user_labels: std::collections::HashMap<String, String>,
     pub segments: Vec<SessionSegment>,
     pub transcript_texts: Vec<String>,
     pub audio_paths: SessionAudioPaths,
@@ -69,8 +81,11 @@ struct ActiveSession {
     user_labels: HashMap<String, String>,
     self_user_id: Option<String>,
     guild_name: Option<String>,
+    guild_id: Option<String>,
     channel_name: Option<String>,
     channel_id: Option<String>,
+    channel_type: Option<u8>,
+    live_mode_enabled: bool,
     open_segments: HashMap<String, u64>, // user_id -> start_ms
     pending_cooldown: HashMap<String, PendingSegment>, // user_id -> pending (waiting to see if they speak again)
     segment_merge_buffer_ms: u64, // min silence (ms) before splitting; e.g. 1000 = merge if gap < 1s
@@ -88,17 +103,30 @@ fn elapsed_ms_since(start: SystemTime) -> u64 {
         .as_millis() as u64
 }
 
+/// Set the channel for real-time segment flushes. Call before start_session when using live transcription.
+pub fn set_live_segment_tx(tx: tokio::sync::mpsc::UnboundedSender<SessionSegment>) {
+    *SEGMENT_FLUSH_TX.lock().unwrap() = Some(tx);
+}
+
+/// Clear the live segment channel. Call when stopping recording.
+pub fn clear_live_segment_tx() {
+    *SEGMENT_FLUSH_TX.lock().unwrap() = None;
+}
+
 /// Start a new recording session.
 /// `segment_merge_buffer_ms`: min silence (ms) before splitting segments; e.g. 1000 = merge if gap < 1s.
 /// `project_name_template`: template for session_id, e.g. "{guild}_{channel}_{timestamp}".
 pub fn start_session(
     guild_name: Option<String>,
+    guild_id: Option<String>,
     channel_name: Option<String>,
     channel_id: Option<String>,
+    channel_type: Option<u8>,
     self_user_id: Option<String>,
     user_labels: HashMap<String, String>,
     segment_merge_buffer_ms: u64,
     project_name_template: String,
+    live_mode_enabled: bool,
 ) {
     let session = ActiveSession {
         start_time: SystemTime::now(),
@@ -106,8 +134,11 @@ pub fn start_session(
         user_labels,
         self_user_id,
         guild_name,
+        guild_id,
         channel_name,
         channel_id,
+        channel_type,
+        live_mode_enabled,
         open_segments: HashMap::new(),
         pending_cooldown: HashMap::new(),
         segment_merge_buffer_ms: segment_merge_buffer_ms.max(1),
@@ -120,16 +151,42 @@ pub fn start_session(
     *ACTIVE_SESSION.lock().unwrap() = Some(session);
 }
 
+/// Flush any pending segments that have exceeded the merge buffer.
+/// Call periodically during live recording so solo speakers get segments flushed.
+pub fn flush_pending_if_elapsed() {
+    let mut guard = ACTIVE_SESSION.lock().unwrap();
+    if let Some(ref mut session) = *guard {
+        let elapsed = elapsed_ms_since(session.start_time);
+        let buffer = session.segment_merge_buffer_ms;
+        let to_flush: Vec<String> = session
+            .pending_cooldown
+            .iter()
+            .filter(|(_, p)| elapsed.saturating_sub(p.stop_ms) >= buffer)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for user_id in to_flush {
+            flush_pending(session, &user_id);
+        }
+    }
+}
+
 /// Flush a pending segment to the segments list.
+/// Sends to SEGMENT_FLUSH_TX if set (for real-time transcription).
 fn flush_pending(session: &mut ActiveSession, user_id: &str) {
     if let Some(pending) = session.pending_cooldown.remove(user_id) {
         let speaker_name = session.user_labels.get(user_id).cloned();
-        session.segments.push(SessionSegment {
+        let seg = SessionSegment {
             start_ms: pending.start_ms,
             end_ms: pending.stop_ms,
             user_id: pending.user_id,
             speaker_name,
-        });
+        };
+        session.segments.push(seg.clone());
+        if let Ok(guard) = SEGMENT_FLUSH_TX.lock() {
+            if let Some(tx) = guard.as_ref() {
+                let _ = tx.send(seg);
+            }
+        }
     }
 }
 
@@ -226,9 +283,13 @@ pub fn stop_session(audio_paths: SessionAudioPaths) -> Option<SessionState> {
             session_id,
             created_at,
             guild_name: session.guild_name,
+            guild_id: session.guild_id,
             channel_name: session.channel_name,
             channel_id: session.channel_id,
+            channel_type: session.channel_type,
+            live_mode_enabled: session.live_mode_enabled,
             self_user_id: session.self_user_id,
+            user_labels: session.user_labels,
             segments: session.segments,
             transcript_texts: vec![], // Filled by transcription or manual edit
             audio_paths,

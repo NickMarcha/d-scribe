@@ -11,10 +11,19 @@ pub struct ProjectFile {
     pub session_id: String,
     pub created_at: u64,
     pub guild_name: Option<String>,
+    #[serde(default)]
+    pub guild_id: Option<String>,
     pub channel_name: Option<String>,
     pub channel_id: Option<String>,
+    /// Discord channel type: 1=dm, 2=guild_voice, 3=group_dm
+    #[serde(default)]
+    pub channel_type: Option<u8>,
+    #[serde(default)]
+    pub live_mode_enabled: bool,
     #[serde(default)]
     pub self_user_id: Option<String>,
+    #[serde(default)]
+    pub user_labels: std::collections::HashMap<String, String>,
     pub segments: Vec<SessionSegment>,
     pub transcript_texts: Vec<String>,
     pub audio_paths: SessionAudioPaths,
@@ -26,9 +35,13 @@ impl From<SessionState> for ProjectFile {
             session_id: s.session_id,
             created_at: s.created_at,
             guild_name: s.guild_name,
+            guild_id: s.guild_id,
             channel_name: s.channel_name,
             channel_id: s.channel_id,
+            channel_type: s.channel_type,
+            live_mode_enabled: s.live_mode_enabled,
             self_user_id: s.self_user_id,
+            user_labels: s.user_labels,
             segments: s.segments,
             transcript_texts: s.transcript_texts,
             audio_paths: s.audio_paths,
@@ -42,9 +55,13 @@ impl From<ProjectFile> for SessionState {
             session_id: p.session_id,
             created_at: p.created_at,
             guild_name: p.guild_name,
+            guild_id: p.guild_id,
             channel_name: p.channel_name,
             channel_id: p.channel_id,
+            channel_type: p.channel_type,
+            live_mode_enabled: p.live_mode_enabled,
             self_user_id: p.self_user_id,
+            user_labels: p.user_labels,
             segments: p.segments,
             transcript_texts: p.transcript_texts,
             audio_paths: p.audio_paths,

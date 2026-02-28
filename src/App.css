@@ -137,6 +137,75 @@ button {
   margin-right: 5px;
 }
 
+.discord-status {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  border-radius: 9999px;
+  z-index: 1000;
+  cursor: default;
+}
+
+.discord-status--expandable {
+  position: relative;
+}
+
+.discord-status--expandable:hover .discord-status-details {
+  opacity: 1;
+  visibility: visible;
+}
+
+.discord-status-details {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1001;
+}
+
+.discord-status-details .discord-status-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.discord-status-details .discord-status-row:last-child {
+  margin-bottom: 0;
+}
+
+.discord-status-key {
+  color: #aaa;
+  min-width: 4rem;
+}
+
+.discord-status-hint {
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-top: 0.35rem;
+}
+
+.discord-status--connected {
+  background: rgba(34, 197, 94, 0.2);
+  color: #16a34a;
+}
+
+.discord-status--disconnected {
+  background: rgba(0, 0, 0, 0.06);
+  color: #888;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;
@@ -154,5 +223,20 @@ button {
   }
   button:active {
     background-color: #0f0f0f69;
+  }
+
+  .discord-status--connected {
+    background: rgba(34, 197, 94, 0.25);
+    color: #4ade80;
+  }
+
+  .discord-status--disconnected {
+    background: rgba(255, 255, 255, 0.08);
+    color: #888;
+  }
+
+  .discord-status-details {
+    background: rgba(30, 30, 30, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
   }
 }

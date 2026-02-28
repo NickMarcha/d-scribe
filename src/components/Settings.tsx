@@ -13,6 +13,10 @@ export function Settings() {
   const [rpcOrigin, setRpcOrigin] = useState("https://localhost");
   const [segmentMergeBufferMs, setSegmentMergeBufferMs] = useState(1000);
   const [recentRetentionDays, setRecentRetentionDays] = useState(10);
+  const [transcriptionMode, setTranscriptionMode] = useState<"integrated" | "remote">("integrated");
+  const [remoteBaseUrl, setRemoteBaseUrl] = useState("");
+  const [remoteModel, setRemoteModel] = useState("");
+  const [remoteApiKey, setRemoteApiKey] = useState("");
   const [showInstructions, setShowInstructions] = useState(false);
   const [status, setStatus] = useState("");
   const [saved, setSaved] = useState(false);
@@ -34,6 +38,11 @@ export function Settings() {
       setRpcOrigin(origin || "https://localhost");
       setSegmentMergeBufferMs(buffer ?? 1000);
       setRecentRetentionDays(retention ?? 10);
+      const mode = await store.get<string>("transcription_mode");
+      setTranscriptionMode(mode === "remote" ? "remote" : "integrated");
+      setRemoteBaseUrl((await store.get<string>("remote_base_url")) || "");
+      setRemoteModel((await store.get<string>("remote_model")) || "");
+      setRemoteApiKey((await store.get<string>("remote_api_key")) || "");
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
@@ -47,6 +56,10 @@ export function Settings() {
       await store.set("rpc_origin", rpcOrigin);
       await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
       await store.set("recent_retention_days", recentRetentionDays);
+      await store.set("transcription_mode", transcriptionMode);
+      await store.set("remote_base_url", remoteBaseUrl);
+      await store.set("remote_model", remoteModel);
+      await store.set("remote_api_key", remoteApiKey);
       await store.save();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -197,6 +210,70 @@ export function Settings() {
           </button>
         </div>
         {status && <p className="status">{status}</p>}
+      </section>
+
+      <section className="settings-section">
+        <h3>Transcription</h3>
+        <div className="form-group">
+          <label>Transcription mode</label>
+          <div className="radio-group">
+            <label>
+              <input
+                type="radio"
+                name="transcription-mode"
+                checked={transcriptionMode === "integrated"}
+                onChange={() => setTranscriptionMode("integrated")}
+              />
+              Integrated (Whisper)
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="transcription-mode"
+                checked={transcriptionMode === "remote"}
+                onChange={() => setTranscriptionMode("remote")}
+              />
+              Remote (OpenAI-compatible API)
+            </label>
+          </div>
+        </div>
+        {transcriptionMode === "remote" && (
+          <>
+            <div className="form-group">
+              <label htmlFor="remote-base-url">API endpoint URL</label>
+              <input
+                id="remote-base-url"
+                type="text"
+                value={remoteBaseUrl}
+                onChange={(e) => setRemoteBaseUrl(e.target.value)}
+                placeholder="http://localhost:8000/v1/audio/transcriptions"
+              />
+              <span className="field-hint">
+                Full endpoint URL, e.g. http://localhost:8000/v1/audio/transcriptions
+              </span>
+            </div>
+            <div className="form-group">
+              <label htmlFor="remote-model">Model</label>
+              <input
+                id="remote-model"
+                type="text"
+                value={remoteModel}
+                onChange={(e) => setRemoteModel(e.target.value)}
+                placeholder="whisper-1 or mistralai/Voxtral-Small-24B-2507"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="remote-api-key">API Key (optional)</label>
+              <input
+                id="remote-api-key"
+                type="password"
+                value={remoteApiKey}
+                onChange={(e) => setRemoteApiKey(e.target.value)}
+                placeholder="For authenticated endpoints"
+              />
+            </div>
+          </>
+        )}
       </section>
     </div>
   );
