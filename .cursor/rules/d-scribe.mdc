@@ -1,0 +1,23 @@
+---
+description: d-scribe project conventions and gotchas
+alwaysApply: true
+---
+
+# d-scribe Conventions
+
+## Audio & Transcription
+
+- **Format**: 16 kHz mono 16-bit PCM everywhere.
+- **Segment extraction** (`wav_extract.rs`): Use `start_sample = start_ms * 16` (16 samples/ms at 16 kHz). Do NOT divide by 1000.
+- **Whisper**: Use `whisper-cli.exe`, not `main.exe`. Prefer `std::process::Command` over sidecar for file access on Windows.
+
+## Paths
+
+- App data: `%APPDATA%/d-scribe/` (projects, models, transcribe_temp).
+- Whisper binary: next to main exe (`whisper-cli.exe` or `whisper-cli-x86_64-pc-windows-msvc.exe`).
+
+## Key Files
+
+- `src-tauri/src/lib.rs` – transcription orchestration
+- `src-tauri/src/transcription/wav_extract.rs` – segment extraction
+- `src-tauri/src/session/recorder.rs` – segments, merge buffer

@@ -1,0 +1,123 @@
+.settings {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: left;
+}
+
+.settings h2 {
+  margin-bottom: 1.5rem;
+}
+
+.settings-section {
+  margin-bottom: 2rem;
+}
+
+.settings-section h3 {
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+}
+
+.settings-hint {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.instructions-toggle {
+  margin-bottom: 1rem;
+  background: transparent;
+  border: 1px dashed #646cff;
+  color: #646cff;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.instructions-toggle:hover {
+  background: rgba(100, 108, 255, 0.1);
+}
+
+.instructions {
+  background: #f0f0f0;
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .instructions {
+    background: #1a1a1a;
+  }
+}
+
+.instructions ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  line-height: 1.6;
+}
+
+.instructions li {
+  margin-bottom: 0.5rem;
+}
+
+.instructions a {
+  color: #646cff;
+}
+
+.instructions code {
+  background: rgba(0, 0, 0, 0.1);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+@media (prefers-color-scheme: dark) {
+  .instructions code {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.form-group input {
+  width: 100%;
+  max-width: 400px;
+}
+
+.field-hint {
+  display: block;
+  font-size: 0.8rem;
+  color: #999;
+  margin-top: 0.4rem;
+}
+
+.button-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.button-row button {
+  padding: 0.6em 1.2em;
+}
+
+.status {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.status:empty {
+  display: none;
+}
