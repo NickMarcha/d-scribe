@@ -6,22 +6,97 @@ use std::path::{Path, PathBuf};
 /// Model source: (model_id, hf_repo, hf_filename, local_filename)
 pub const MODEL_SOURCES: &[(&str, &str, &str, &str)] = &[
     // ggerganov
-    ("tiny.en", "ggerganov/whisper.cpp", "ggml-tiny.en.bin", "ggml-tiny.en.bin"),
-    ("tiny", "ggerganov/whisper.cpp", "ggml-tiny.bin", "ggml-tiny.bin"),
-    ("base.en", "ggerganov/whisper.cpp", "ggml-base.en.bin", "ggml-base.en.bin"),
-    ("base", "ggerganov/whisper.cpp", "ggml-base.bin", "ggml-base.bin"),
-    ("small.en", "ggerganov/whisper.cpp", "ggml-small.en.bin", "ggml-small.bin"),
-    ("small", "ggerganov/whisper.cpp", "ggml-small.bin", "ggml-small.bin"),
-    ("medium.en", "ggerganov/whisper.cpp", "ggml-medium.en.bin", "ggml-medium.en.bin"),
-    ("medium", "ggerganov/whisper.cpp", "ggml-medium.bin", "ggml-medium.bin"),
-    ("large-v3", "ggerganov/whisper.cpp", "ggml-large-v3.bin", "ggml-large-v3.bin"),
-    ("large-v3-turbo", "ggerganov/whisper.cpp", "ggml-large-v3-turbo.bin", "ggml-large-v3-turbo.bin"),
+    (
+        "tiny.en",
+        "ggerganov/whisper.cpp",
+        "ggml-tiny.en.bin",
+        "ggml-tiny.en.bin",
+    ),
+    (
+        "tiny",
+        "ggerganov/whisper.cpp",
+        "ggml-tiny.bin",
+        "ggml-tiny.bin",
+    ),
+    (
+        "base.en",
+        "ggerganov/whisper.cpp",
+        "ggml-base.en.bin",
+        "ggml-base.en.bin",
+    ),
+    (
+        "base",
+        "ggerganov/whisper.cpp",
+        "ggml-base.bin",
+        "ggml-base.bin",
+    ),
+    (
+        "small.en",
+        "ggerganov/whisper.cpp",
+        "ggml-small.en.bin",
+        "ggml-small.bin",
+    ),
+    (
+        "small",
+        "ggerganov/whisper.cpp",
+        "ggml-small.bin",
+        "ggml-small.bin",
+    ),
+    (
+        "medium.en",
+        "ggerganov/whisper.cpp",
+        "ggml-medium.en.bin",
+        "ggml-medium.en.bin",
+    ),
+    (
+        "medium",
+        "ggerganov/whisper.cpp",
+        "ggml-medium.bin",
+        "ggml-medium.bin",
+    ),
+    (
+        "large-v3",
+        "ggerganov/whisper.cpp",
+        "ggml-large-v3.bin",
+        "ggml-large-v3.bin",
+    ),
+    (
+        "large-v3-turbo",
+        "ggerganov/whisper.cpp",
+        "ggml-large-v3-turbo.bin",
+        "ggml-large-v3-turbo.bin",
+    ),
     // NbAiLab Norwegian
-    ("nb-whisper-tiny", "NbAiLab/nb-whisper-tiny", "ggml-model.bin", "nb-whisper-tiny.bin"),
-    ("nb-whisper-base", "NbAiLab/nb-whisper-base", "ggml-model.bin", "nb-whisper-base.bin"),
-    ("nb-whisper-small", "NbAiLab/nb-whisper-small", "ggml-model.bin", "nb-whisper-small.bin"),
-    ("nb-whisper-medium", "NbAiLab/nb-whisper-medium", "ggml-model.bin", "nb-whisper-medium.bin"),
-    ("nb-whisper-large", "NbAiLab/nb-whisper-large", "ggml-model.bin", "nb-whisper-large.bin"),
+    (
+        "nb-whisper-tiny",
+        "NbAiLab/nb-whisper-tiny",
+        "ggml-model.bin",
+        "nb-whisper-tiny.bin",
+    ),
+    (
+        "nb-whisper-base",
+        "NbAiLab/nb-whisper-base",
+        "ggml-model.bin",
+        "nb-whisper-base.bin",
+    ),
+    (
+        "nb-whisper-small",
+        "NbAiLab/nb-whisper-small",
+        "ggml-model.bin",
+        "nb-whisper-small.bin",
+    ),
+    (
+        "nb-whisper-medium",
+        "NbAiLab/nb-whisper-medium",
+        "ggml-model.bin",
+        "nb-whisper-medium.bin",
+    ),
+    (
+        "nb-whisper-large",
+        "NbAiLab/nb-whisper-large",
+        "ggml-model.bin",
+        "nb-whisper-large.bin",
+    ),
 ];
 
 /// Download with progress callback. Callback receives (bytes_downloaded, total_bytes).
@@ -43,7 +118,10 @@ where
             format!(
                 "Unknown model: {}. Available: {:?}",
                 model_name,
-                MODEL_SOURCES.iter().map(|(id, _, _, _)| *id).collect::<Vec<_>>()
+                MODEL_SOURCES
+                    .iter()
+                    .map(|(id, _, _, _)| *id)
+                    .collect::<Vec<_>>()
             )
         })?;
 
@@ -57,9 +135,7 @@ where
         return Ok(output_path.to_string_lossy().into_owned());
     }
 
-    let response = reqwest::get(&url)
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
         if model_name == "large-v3-turbo" {
@@ -109,9 +185,8 @@ pub fn list_installed_model_names(models_dir: &Path) -> Vec<String> {
         let path = entry.path();
         if path.extension().map_or(false, |e| e == "bin") {
             if let Some(name) = path.file_name().and_then(|f| f.to_str()) {
-                if let Some((model_id, _, _, _)) = MODEL_SOURCES
-                    .iter()
-                    .find(|(_, _, _, local)| *local == name)
+                if let Some((model_id, _, _, _)) =
+                    MODEL_SOURCES.iter().find(|(_, _, _, local)| *local == name)
                 {
                     names.push((*model_id).to_string());
                 }

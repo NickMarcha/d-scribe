@@ -6,18 +6,28 @@ mod project;
 mod session;
 mod transcription;
 
-use log::{debug, warn};
-use tauri::{Emitter, Manager};
 use audio::{start_audio_capture, stop_audio_capture, AudioCaptureHandle};
-use discord_rpc::{get_channel_info, is_rpc_connected, save_tokens, load_tokens, DiscordRpcClient};
+use discord_rpc::{get_channel_info, is_rpc_connected, load_tokens, save_tokens, DiscordRpcClient};
 use export::{export_srt, export_vtt};
+use log::{debug, warn};
 use paths::{app_data_dir, discord_tokens_path, models_dir, projects_dir};
-use project::{auto_save_project, delete_project, format_project_name, list_projects, list_projects_with_meta, load_project, purge_old_recent, save_project};
-use tauri_plugin_shell::ShellExt;
-use transcription::{download_model_with_progress, extract_segment, list_installed_model_names, list_models, resolve_model_path, transcribe_via_api, write_wav_from_samples, RemoteTranscriptionConfig, WhisperCliBackend};
-use session::{clear_live_segment_tx, flush_pending_if_elapsed, record_speaking_event, set_live_segment_tx, start_session, stop_session, SessionAudioPaths, SessionSegment, SessionState};
+use project::{
+    auto_save_project, delete_project, format_project_name, list_projects, list_projects_with_meta,
+    load_project, purge_old_recent, save_project,
+};
+use session::{
+    clear_live_segment_tx, flush_pending_if_elapsed, record_speaking_event, set_live_segment_tx,
+    start_session, stop_session, SessionAudioPaths, SessionSegment, SessionState,
+};
 use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager};
+use tauri_plugin_shell::ShellExt;
 use tokio::sync::mpsc;
+use transcription::{
+    download_model_with_progress, extract_segment, list_installed_model_names, list_models,
+    resolve_model_path, transcribe_via_api, write_wav_from_samples, RemoteTranscriptionConfig,
+    WhisperCliBackend,
+};
 
 #[tauri::command]
 fn get_app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
@@ -46,7 +56,8 @@ async fn discord_rpc_connect(
     client_secret: String,
     rpc_origin: String,
 ) -> Result<(), String> {
-    let client = DiscordRpcClient::new(client_id.clone(), client_secret.clone(), rpc_origin.clone());
+    let client =
+        DiscordRpcClient::new(client_id.clone(), client_secret.clone(), rpc_origin.clone());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let refresh_token = client.connect(tx).await?;
     if let Some(refresh) = refresh_token {
@@ -171,10 +182,12 @@ fn start_recording(
     live_remote_api_key: Option<String>,
     live_language_code: Option<String>,
 ) -> Result<(), String> {
-    let channel_info = get_channel_info().ok_or("Not connected to Discord. Connect in Settings first.")?;
+    let channel_info =
+        get_channel_info().ok_or("Not connected to Discord. Connect in Settings first.")?;
     let user_labels: std::collections::HashMap<String, String> = channel_info.user_labels.clone();
     let buffer_ms = segment_merge_buffer_ms.unwrap_or(1000);
-    let template = project_name_template.unwrap_or_else(|| "{guild}_{channel}_{timestamp}".to_string());
+    let template =
+        project_name_template.unwrap_or_else(|| "{guild}_{channel}_{timestamp}".to_string());
     let live = live_realtime.unwrap_or(false);
     let self_user_id = channel_info.self_user_id.clone();
 
@@ -203,8 +216,12 @@ fn start_recording(
 
         let app_handle = app.clone();
         let use_remote = live_transcription_mode.as_deref() == Some("remote")
-            && live_remote_base_url.as_ref().map_or(false, |u| !u.trim().is_empty())
-            && live_remote_model.as_ref().map_or(false, |m| !m.trim().is_empty());
+            && live_remote_base_url
+                .as_ref()
+                .map_or(false, |u| !u.trim().is_empty())
+            && live_remote_model
+                .as_ref()
+                .map_or(false, |m| !m.trim().is_empty());
         let remote_config = use_remote.then(|| {
             RemoteTranscriptionConfig::new(
                 live_remote_base_url.clone().unwrap_or_default(),
@@ -214,25 +231,28 @@ fn start_recording(
         });
         let model_path = live_model_path.clone();
         let language_code = live_language_code.clone();
-        let whisper_path = (!use_remote).then(|| {
-            std::env::current_exe().ok().and_then(|p| {
-                let dir = p.parent()?;
-                let exe = dir.join("whisper-cli.exe");
-                if exe.exists() {
-                    Some(exe)
-                } else {
-                    #[cfg(windows)]
-                    {
-                        let exe = dir.join("whisper-cli-x86_64-pc-windows-msvc.exe");
-                        if exe.exists() {
-                            return Some(exe);
+        let whisper_path = (!use_remote)
+            .then(|| {
+                std::env::current_exe().ok().and_then(|p| {
+                    let dir = p.parent()?;
+                    let exe = dir.join("whisper-cli.exe");
+                    if exe.exists() {
+                        Some(exe)
+                    } else {
+                        #[cfg(windows)]
+                        {
+                            let exe = dir.join("whisper-cli-x86_64-pc-windows-msvc.exe");
+                            if exe.exists() {
+                                return Some(exe);
+                            }
                         }
+                        None
                     }
-                    None
-                }
+                })
             })
-        }).flatten();
-        let use_sidecar = !use_remote && whisper_path.is_none() && app.shell().sidecar("whisper-cli").is_ok();
+            .flatten();
+        let use_sidecar =
+            !use_remote && whisper_path.is_none() && app.shell().sidecar("whisper-cli").is_ok();
         let temp_dir = app_data_dir(&app).map(|d| d.join("transcribe_temp")).ok();
 
         // Spawn periodic flush so solo speakers get segments (pending is flushed after buffer_ms)
@@ -249,7 +269,10 @@ fn start_recording(
 
         tauri::async_runtime::spawn(async move {
             while let Some(seg) = rx.recv().await {
-                debug!("[live] segment received: {}..{} ms, user={}", seg.start_ms, seg.end_ms, seg.user_id);
+                debug!(
+                    "[live] segment received: {}..{} ms, user={}",
+                    seg.start_ms, seg.end_ms, seg.user_id
+                );
                 if seg.end_ms <= seg.start_ms {
                     debug!("[live] skipping invalid segment (end <= start)");
                     continue;
@@ -275,9 +298,18 @@ fn start_recording(
                     }
                 };
                 let _ = std::fs::create_dir_all(&temp_dir);
-                let seg_path = temp_dir.join(format!("live_seg_{}.wav", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+                let seg_path = temp_dir.join(format!(
+                    "live_seg_{}.wav",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis()
+                ));
                 if write_wav_from_samples(&seg_path, &samples).is_err() {
-                    warn!("[live] failed to write WAV for segment {}..{} ms", seg.start_ms, seg.end_ms);
+                    warn!(
+                        "[live] failed to write WAV for segment {}..{} ms",
+                        seg.start_ms, seg.end_ms
+                    );
                     continue;
                 }
                 let text = if use_remote {
@@ -286,7 +318,9 @@ fn start_recording(
                         None => String::new(),
                     }
                 } else if let Some(ref exe) = whisper_path {
-                    let model = model_path.as_ref().filter(|p| std::path::Path::new(p).exists());
+                    let model = model_path
+                        .as_ref()
+                        .filter(|p| std::path::Path::new(p).exists());
                     if model.is_none() {
                         warn!("[live] no valid model path (missing or path does not exist), segment will have empty text");
                     }
@@ -314,21 +348,25 @@ fn start_recording(
                                 "-of".into(),
                                 of_base.to_string_lossy().into_owned(),
                             ]);
-                            let output = std::process::Command::new(&exe)
-                                .args(&args)
-                                .output();
+                            let output = std::process::Command::new(&exe).args(&args).output();
                             match output {
                                 Ok(out) if out.status.success() => {
                                     let txt_path = seg_path_buf.with_extension("txt");
-                                    let raw = std::fs::read_to_string(&txt_path).unwrap_or_default();
+                                    let raw =
+                                        std::fs::read_to_string(&txt_path).unwrap_or_default();
                                     let _ = std::fs::remove_file(&txt_path);
                                     raw.lines()
                                         .filter_map(|line| {
                                             let t = line.trim();
-                                            if t.is_empty() { None }
-                                            else if t.starts_with('[') && t.contains("-->") {
-                                                t.find(']').map(|i| t[i + 1..].trim().to_string()).filter(|s| !s.is_empty())
-                                            } else { Some(t.to_string()) }
+                                            if t.is_empty() {
+                                                None
+                                            } else if t.starts_with('[') && t.contains("-->") {
+                                                t.find(']')
+                                                    .map(|i| t[i + 1..].trim().to_string())
+                                                    .filter(|s| !s.is_empty())
+                                            } else {
+                                                Some(t.to_string())
+                                            }
                                         })
                                         .collect::<Vec<_>>()
                                         .join(" ")
@@ -345,7 +383,9 @@ fn start_recording(
                     }
                 } else if use_sidecar {
                     if let Ok(sidecar) = app_handle.shell().sidecar("whisper-cli") {
-                        let model = model_path.as_ref().filter(|p| std::path::Path::new(p).exists());
+                        let model = model_path
+                            .as_ref()
+                            .filter(|p| std::path::Path::new(p).exists());
                         if let Some(m) = model {
                             let of_base = seg_path.with_extension("");
                             let mut sidecar_args: Vec<String> = vec![
@@ -365,39 +405,58 @@ fn start_recording(
                                 "-of".into(),
                                 of_base.to_string_lossy().into_owned(),
                             ]);
-                            let output = sidecar
-                                .args(sidecar_args)
-                                .output()
-                                .await;
+                            let output = sidecar.args(sidecar_args).output().await;
                             if let Ok(out) = output {
                                 if out.status.success() {
                                     let txt_path = seg_path.with_extension("txt");
-                                    let raw = std::fs::read_to_string(&txt_path).unwrap_or_default();
+                                    let raw =
+                                        std::fs::read_to_string(&txt_path).unwrap_or_default();
                                     let _ = std::fs::remove_file(&txt_path);
                                     raw.lines()
                                         .filter_map(|line| {
                                             let t = line.trim();
-                                            if t.is_empty() { None }
-                                            else if t.starts_with('[') && t.contains("-->") {
-                                                t.find(']').map(|i| t[i + 1..].trim().to_string()).filter(|s| !s.is_empty())
-                                            } else { Some(t.to_string()) }
+                                            if t.is_empty() {
+                                                None
+                                            } else if t.starts_with('[') && t.contains("-->") {
+                                                t.find(']')
+                                                    .map(|i| t[i + 1..].trim().to_string())
+                                                    .filter(|s| !s.is_empty())
+                                            } else {
+                                                Some(t.to_string())
+                                            }
                                         })
                                         .collect::<Vec<_>>()
                                         .join(" ")
                                         .trim()
                                         .to_string()
-                                } else { String::new() }
-                            } else { String::new() }
-                        } else { String::new() }
-                    } else { String::new() }
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    }
                 } else {
                     warn!("[live] no transcription backend (whisper-cli not found, sidecar unavailable)");
                     String::new()
                 };
                 let idx = LIVE_TRANSCRIPT_TEXTS.lock().unwrap().len();
                 LIVE_TRANSCRIPT_TEXTS.lock().unwrap().push(text.clone());
-                debug!("[live] emitted transcript-segment idx={} len={} preview={:?}", idx, text.len(), text.chars().take(50).collect::<String>());
-                let _ = app_handle.emit("transcript-segment", serde_json::json!({ "segment": seg, "text": text, "index": idx }));
+                debug!(
+                    "[live] emitted transcript-segment idx={} len={} preview={:?}",
+                    idx,
+                    text.len(),
+                    text.chars().take(50).collect::<String>()
+                );
+                let _ = app_handle.emit(
+                    "transcript-segment",
+                    serde_json::json!({ "segment": seg, "text": text, "index": idx }),
+                );
                 let _ = std::fs::remove_file(&seg_path);
             }
         });
@@ -489,7 +548,9 @@ fn list_projects_command(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn list_projects_with_meta_command(app: tauri::AppHandle) -> Result<Vec<project::ProjectMeta>, String> {
+fn list_projects_with_meta_command(
+    app: tauri::AppHandle,
+) -> Result<Vec<project::ProjectMeta>, String> {
     list_projects_with_meta(&app)
 }
 
@@ -546,7 +607,10 @@ async fn download_model_command(
 }
 
 #[tauri::command]
-fn resolve_model_path_command(app: tauri::AppHandle, model_name: String) -> Result<Option<String>, String> {
+fn resolve_model_path_command(
+    app: tauri::AppHandle,
+    model_name: String,
+) -> Result<Option<String>, String> {
     let dir = models_dir(&app)?;
     Ok(resolve_model_path(&dir, &model_name).map(|p| p.to_string_lossy().into_owned()))
 }
@@ -573,12 +637,7 @@ async fn list_remote_models_command(
     models_path: Option<String>,
     api_key: Option<String>,
 ) -> Result<Vec<String>, String> {
-    list_models(
-        &host,
-        models_path.as_deref(),
-        api_key.as_deref(),
-    )
-    .await
+    list_models(&host, models_path.as_deref(), api_key.as_deref()).await
 }
 
 #[tauri::command]
@@ -606,35 +665,38 @@ async fn transcribe_session_command(
         .ok_or("No microphone audio")?;
 
     let use_remote = transcription_mode == "remote"
-        && remote_base_url.as_ref().map_or(false, |u| !u.trim().is_empty())
-        && remote_model.as_ref().map_or(false, |m| !m.trim().is_empty());
+        && remote_base_url
+            .as_ref()
+            .map_or(false, |u| !u.trim().is_empty())
+        && remote_model
+            .as_ref()
+            .map_or(false, |m| !m.trim().is_empty());
 
     let (model_path_buf, whisper_path, use_sidecar) = if use_remote {
         (std::path::PathBuf::new(), None, false)
     } else {
-        let model_path = model_path.ok_or("No model path. Download a model (Settings) or select one.")?;
+        let model_path =
+            model_path.ok_or("No model path. Download a model (Settings) or select one.")?;
         let model_path_buf = std::path::Path::new(&model_path).to_path_buf();
         if !model_path_buf.exists() {
             return Err(format!("Model not found: {}", model_path));
         }
-        let whisper_path = std::env::current_exe()
-            .ok()
-            .and_then(|p| {
-                let dir = p.parent()?;
-                let exe = dir.join("whisper-cli.exe");
-                if exe.exists() {
-                    Some(exe)
-                } else {
-                    #[cfg(windows)]
-                    {
-                        let exe = dir.join("whisper-cli-x86_64-pc-windows-msvc.exe");
-                        if exe.exists() {
-                            return Some(exe);
-                        }
+        let whisper_path = std::env::current_exe().ok().and_then(|p| {
+            let dir = p.parent()?;
+            let exe = dir.join("whisper-cli.exe");
+            if exe.exists() {
+                Some(exe)
+            } else {
+                #[cfg(windows)]
+                {
+                    let exe = dir.join("whisper-cli-x86_64-pc-windows-msvc.exe");
+                    if exe.exists() {
+                        return Some(exe);
                     }
-                    None
                 }
-            });
+                None
+            }
+        });
         let use_sidecar = whisper_path.is_none() && app.shell().sidecar("whisper-cli").is_ok();
         (model_path_buf, whisper_path, use_sidecar)
     };
@@ -666,14 +728,20 @@ async fn transcribe_session_command(
     let current_exe = std::env::current_exe().ok();
     debug!(
         "[transcribe] mode: whisper_path={:?}, use_sidecar={}, current_exe={:?}",
-        whisper_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+        whisper_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
         use_sidecar,
-        current_exe.as_ref().map(|p| p.to_string_lossy().to_string())
+        current_exe
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
     );
     if !use_remote && whisper_path.is_none() && !use_sidecar {
         warn!(
             "[transcribe] No whisper binary found. Looked for whisper-cli.exe next to {:?}",
-            current_exe.as_ref().and_then(|p| p.parent().map(|d| d.to_string_lossy().to_string()))
+            current_exe
+                .as_ref()
+                .and_then(|p| p.parent().map(|d| d.to_string_lossy().to_string()))
         );
     }
 
@@ -692,16 +760,14 @@ async fn transcribe_session_command(
         }
 
         extract_segment(source_path, &segment_path, seg.start_ms, seg.end_ms)?;
-        let seg_size = std::fs::metadata(&segment_path).ok().map(|m| m.len()).unwrap_or(0);
+        let seg_size = std::fs::metadata(&segment_path)
+            .ok()
+            .map(|m| m.len())
+            .unwrap_or(0);
         let segment_path_str = segment_path.to_string_lossy().to_string();
         debug!(
             "[transcribe] segment {}: {} -> {} ms, source={:?}, seg_file={}, seg_size_bytes={}",
-            i,
-            seg.start_ms,
-            seg.end_ms,
-            source_path,
-            segment_path_str,
-            seg_size
+            i, seg.start_ms, seg.end_ms, source_path, segment_path_str, seg_size
         );
 
         let result = if use_remote {
@@ -709,7 +775,10 @@ async fn transcribe_session_command(
             transcribe_via_api(config, &segment_path).await
         } else if let Some(ref whisper_exe) = whisper_path {
             // Run whisper directly - same process, full file access
-            debug!("[transcribe] segment {}: using direct Command, exe={:?}", i, whisper_exe);
+            debug!(
+                "[transcribe] segment {}: using direct Command, exe={:?}",
+                i, whisper_exe
+            );
             let txt_path = segment_path.with_extension("txt");
             let of_base = segment_path.with_extension("");
             let mut args: Vec<&str> = vec![
@@ -748,7 +817,12 @@ async fn transcribe_session_command(
             }
             if output.status.success() {
                 let raw = std::fs::read_to_string(&txt_path).unwrap_or_default();
-                debug!("[transcribe] segment {}: txt raw len={}, content={:?}", i, raw.len(), raw.chars().take(200).collect::<String>());
+                debug!(
+                    "[transcribe] segment {}: txt raw len={}, content={:?}",
+                    i,
+                    raw.len(),
+                    raw.chars().take(200).collect::<String>()
+                );
                 let text = raw
                     .lines()
                     .filter_map(|line| {
@@ -768,7 +842,12 @@ async fn transcribe_session_command(
                     .trim()
                     .to_string();
                 let _ = std::fs::remove_file(&txt_path);
-                debug!("[transcribe] segment {}: parsed text len={}, text={:?}", i, text.len(), text.chars().take(100).collect::<String>());
+                debug!(
+                    "[transcribe] segment {}: parsed text len={}, text={:?}",
+                    i,
+                    text.len(),
+                    text.chars().take(100).collect::<String>()
+                );
                 Ok(text)
             } else {
                 Err(format!("Whisper failed: {}", stderr_s.trim()))
@@ -783,7 +862,10 @@ async fn transcribe_session_command(
             })?;
             // Use -otxt -of to write to file: sidecar stdout capture can be unreliable
             let txt_path = segment_path.with_extension("txt");
-            let of_base_str = segment_path.with_extension("").to_string_lossy().into_owned();
+            let of_base_str = segment_path
+                .with_extension("")
+                .to_string_lossy()
+                .into_owned();
             let mut sidecar_args: Vec<String> = vec![
                 "-m".into(),
                 model_path_buf.to_string_lossy().into_owned(),
@@ -823,7 +905,12 @@ async fn transcribe_session_command(
             }
             if output.status.success() {
                 let raw = std::fs::read_to_string(&txt_path).unwrap_or_default();
-                debug!("[transcribe] segment {}: sidecar txt raw len={}, content={:?}", i, raw.len(), raw.chars().take(200).collect::<String>());
+                debug!(
+                    "[transcribe] segment {}: sidecar txt raw len={}, content={:?}",
+                    i,
+                    raw.len(),
+                    raw.chars().take(200).collect::<String>()
+                );
                 let text = raw
                     .lines()
                     .filter_map(|line| {
@@ -843,7 +930,12 @@ async fn transcribe_session_command(
                     .trim()
                     .to_string();
                 let _ = std::fs::remove_file(&txt_path);
-                debug!("[transcribe] segment {}: sidecar parsed text len={}, text={:?}", i, text.len(), text.chars().take(100).collect::<String>());
+                debug!(
+                    "[transcribe] segment {}: sidecar parsed text len={}, text={:?}",
+                    i,
+                    text.len(),
+                    text.chars().take(100).collect::<String>()
+                );
                 Ok(text)
             } else {
                 let err_msg = if stderr_s.trim().is_empty() && !stdout_s.trim().is_empty() {
@@ -856,7 +948,10 @@ async fn transcribe_session_command(
                 Err(format!("Whisper failed: {}", err_msg))
             }
         } else {
-            debug!("[transcribe] segment {}: using WhisperCliBackend fallback", i);
+            debug!(
+                "[transcribe] segment {}: using WhisperCliBackend fallback",
+                i
+            );
             let backend = WhisperCliBackend::new(
                 Some(model_path_buf.to_string_lossy().into_owned()),
                 None,
@@ -867,7 +962,12 @@ async fn transcribe_session_command(
 
         match &result {
             Ok(t) => {
-                debug!("[transcribe] segment {}: SUCCESS, text len={}, preview={:?}", i, t.len(), t.chars().take(80).collect::<String>());
+                debug!(
+                    "[transcribe] segment {}: SUCCESS, text len={}, preview={:?}",
+                    i,
+                    t.len(),
+                    t.chars().take(80).collect::<String>()
+                );
                 texts[i] = t.to_string();
             }
             Err(e) => {
@@ -950,16 +1050,17 @@ fn init_logger() -> Result<std::path::PathBuf, fern::InitError> {
     std::fs::create_dir_all(&log_dir).ok();
     let log_file = log_dir.join("d-scribe.log");
 
-    let format = |out: fern::FormatCallback<'_>, message: &std::fmt::Arguments<'_>, record: &log::Record| {
-        out.finish(format_args!(
-            "[{}][{}][{}][{:?}] {}",
-            chrono::Local::now().format("%Y-%m-%d"),
-            chrono::Local::now().format("%H:%M:%S"),
-            record.target(),
-            record.level(),
-            message
-        ))
-    };
+    let format =
+        |out: fern::FormatCallback<'_>, message: &std::fmt::Arguments<'_>, record: &log::Record| {
+            out.finish(format_args!(
+                "[{}][{}][{}][{:?}] {}",
+                chrono::Local::now().format("%Y-%m-%d"),
+                chrono::Local::now().format("%H:%M:%S"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        };
 
     fern::Dispatch::new()
         .format(format)
@@ -980,6 +1081,7 @@ pub fn run() {
     let _log_path = init_logger().ok();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_log::Builder::default().skip_logger().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())

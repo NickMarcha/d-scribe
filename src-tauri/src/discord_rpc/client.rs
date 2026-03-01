@@ -11,10 +11,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{
-        client::IntoClientRequest,
-        protocol::Message,
-    },
+    tungstenite::{client::IntoClientRequest, protocol::Message},
 };
 use uuid::Uuid;
 
@@ -54,7 +51,10 @@ pub async fn refresh_access_token(
         .and_then(|v| v.as_str())
         .ok_or("No access_token in refresh response")?
         .to_string();
-    let new_refresh = data.get("refresh_token").and_then(|v| v.as_str()).map(String::from);
+    let new_refresh = data
+        .get("refresh_token")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     Ok((access_token, new_refresh))
 }
 
@@ -187,14 +187,14 @@ impl DiscordRpcClient {
                     }
                 });
 
-                    match ready_rx.await {
-                        Ok(Ok(refresh_token)) => {
-                            info!("[discord-rpc] Auth flow complete (IPC), channel info set");
-                            return Ok(refresh_token);
-                        }
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => return Err("Connection task dropped".into()),
+                match ready_rx.await {
+                    Ok(Ok(refresh_token)) => {
+                        info!("[discord-rpc] Auth flow complete (IPC), channel info set");
+                        return Ok(refresh_token);
                     }
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Err("Connection task dropped".into()),
+                }
             }
             info!("[discord-rpc] IPC failed, falling back to WebSocket");
         }
@@ -225,20 +225,20 @@ impl DiscordRpcClient {
                     let tx = tx.clone();
                     let rpc_origin = self.rpc_origin.clone();
 
-                let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-                tokio::spawn(async move {
-                    match Self::run_connection(
-                        write,
-                        read,
-                        &state,
-                        &client_id,
-                        &client_secret,
-                        &rpc_origin,
-                        tx,
-                        ready_tx,
-                        None,
-                    )
-                    .await
+                    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+                    tokio::spawn(async move {
+                        match Self::run_connection(
+                            write,
+                            read,
+                            &state,
+                            &client_id,
+                            &client_secret,
+                            &rpc_origin,
+                            tx,
+                            ready_tx,
+                            None,
+                        )
+                        .await
                         {
                             Ok(()) => {}
                             Err(e) => {
@@ -277,8 +277,13 @@ impl DiscordRpcClient {
         tx: mpsc::UnboundedSender<SpeakingEvent>,
         refresh_token: String,
     ) -> Result<Option<String>, String> {
-        let (access_token, new_refresh) =
-            refresh_access_token(&self.client_id, &self.client_secret, &self.rpc_origin, &refresh_token).await?;
+        let (access_token, new_refresh) = refresh_access_token(
+            &self.client_id,
+            &self.client_secret,
+            &self.rpc_origin,
+            &refresh_token,
+        )
+        .await?;
         let refresh_to_save = new_refresh.as_ref().unwrap_or(&refresh_token);
 
         *self.state.connection_state.write().await = RpcConnectionState::Connecting;
@@ -469,13 +474,19 @@ impl DiscordRpcClient {
             });
 
             let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
-            state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+            state
+                .pending
+                .write()
+                .await
+                .insert(nonce.clone(), tx_oneshot);
             write
                 .send(Message::Text(auth_cmd.to_string()))
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let auth_response = rx_oneshot.await.map_err(|_| "Auth response channel closed")?;
+            let auth_response = rx_oneshot
+                .await
+                .map_err(|_| "Auth response channel closed")?;
             let code = match auth_response.get("code").and_then(|v| v.as_str()) {
                 Some(c) => c.to_string(),
                 None => {
@@ -512,7 +523,8 @@ impl DiscordRpcClient {
                 return Err(err);
             }
 
-            let token_data: serde_json::Value = token_response.json().await.map_err(|e| e.to_string())?;
+            let token_data: serde_json::Value =
+                token_response.json().await.map_err(|e| e.to_string())?;
             let access_token = match token_data.get("access_token").and_then(|v| v.as_str()) {
                 Some(t) => t.to_string(),
                 None => {
@@ -521,7 +533,10 @@ impl DiscordRpcClient {
                     return Err(err);
                 }
             };
-            let refresh_token_to_save = token_data.get("refresh_token").and_then(|v| v.as_str()).map(String::from);
+            let refresh_token_to_save = token_data
+                .get("refresh_token")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             (access_token, refresh_token_to_save)
         };
 
@@ -536,7 +551,11 @@ impl DiscordRpcClient {
         });
 
         let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
-        state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+        state
+            .pending
+            .write()
+            .await
+            .insert(nonce.clone(), tx_oneshot);
         write
             .send(Message::Text(auth_cmd.to_string()))
             .await
@@ -559,7 +578,11 @@ impl DiscordRpcClient {
         });
 
         let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
-        state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+        state
+            .pending
+            .write()
+            .await
+            .insert(nonce.clone(), tx_oneshot);
         write
             .send(Message::Text(get_channel_cmd.to_string()))
             .await
@@ -597,15 +620,25 @@ impl DiscordRpcClient {
                 "args": { "guild_id": gid }
             });
             let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
-            state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+            state
+                .pending
+                .write()
+                .await
+                .insert(nonce.clone(), tx_oneshot);
             let _ = write.send(Message::Text(get_guild_cmd.to_string())).await;
-            rx_oneshot.await.ok().and_then(|d| d.get("name").and_then(|v| v.as_str()).map(String::from))
+            rx_oneshot
+                .await
+                .ok()
+                .and_then(|d| d.get("name").and_then(|v| v.as_str()).map(String::from))
         } else {
             None
         };
 
         let mut user_labels = std::collections::HashMap::new();
-        if let Some(states) = channel_response.get("voice_states").and_then(|v| v.as_array()) {
+        if let Some(states) = channel_response
+            .get("voice_states")
+            .and_then(|v| v.as_array())
+        {
             for vs in states {
                 let user = vs.get("user");
                 let user_id = user
@@ -624,7 +657,9 @@ impl DiscordRpcClient {
             }
         }
         if let Some(ref uid) = self_user_id {
-            user_labels.entry(uid.clone()).or_insert_with(|| uid.clone());
+            user_labels
+                .entry(uid.clone())
+                .or_insert_with(|| uid.clone());
         }
 
         set_channel_info(ChannelInfo {
@@ -659,7 +694,11 @@ impl DiscordRpcClient {
                 "args": {}
             });
             let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
-            state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+            state
+                .pending
+                .write()
+                .await
+                .insert(nonce.clone(), tx_oneshot);
             write
                 .send(Message::Text(sub_cmd.to_string()))
                 .await
@@ -678,7 +717,11 @@ impl DiscordRpcClient {
             });
 
             let (tx_oneshot, rx_oneshot) = tokio::sync::oneshot::channel();
-            state.pending.write().await.insert(nonce.clone(), tx_oneshot);
+            state
+                .pending
+                .write()
+                .await
+                .insert(nonce.clone(), tx_oneshot);
             write
                 .send(Message::Text(sub_cmd.to_string()))
                 .await
@@ -724,8 +767,7 @@ impl DiscordRpcClient {
                                                 .map(|n| n as u8);
                                             // Skip GET_GUILD in refresh to avoid blocking the message loop
                                             let guild_name: Option<String> = None;
-                                            let mut user_labels =
-                                                std::collections::HashMap::new();
+                                            let mut user_labels = std::collections::HashMap::new();
                                             if let Some(states) = channel_response
                                                 .get("voice_states")
                                                 .and_then(|v| v.as_array())
@@ -784,9 +826,7 @@ impl DiscordRpcClient {
                                                         "args": { "channel_id": old_id }
                                                     });
                                                     let _ = write
-                                                        .send(Message::Text(
-                                                            unsub.to_string(),
-                                                        ))
+                                                        .send(Message::Text(unsub.to_string()))
                                                         .await;
                                                 }
                                             }
@@ -798,14 +838,14 @@ impl DiscordRpcClient {
                                                     "evt": evt,
                                                     "args": { "channel_id": new_channel_id }
                                                 });
-                                                let (stx, srx) =
-                                                    tokio::sync::oneshot::channel();
-                                                state.pending.write().await
+                                                let (stx, srx) = tokio::sync::oneshot::channel();
+                                                state
+                                                    .pending
+                                                    .write()
+                                                    .await
                                                     .insert(snonce.clone(), stx);
                                                 let _ = write
-                                                    .send(Message::Text(
-                                                        sub_cmd.to_string(),
-                                                    ))
+                                                    .send(Message::Text(sub_cmd.to_string()))
                                                     .await;
                                                 let _ = srx.await;
                                             }
@@ -835,16 +875,14 @@ impl DiscordRpcClient {
                             *state.current_channel_id.write().await = None;
                             info!("[discord-rpc] User left voice channel");
                         } else if let Some(new_ch_id) = ch_id {
-                            let old_ch_id =
-                                state.current_channel_id.read().await.clone();
+                            let old_ch_id = state.current_channel_id.read().await.clone();
                             let nonce = Uuid::new_v4().to_string();
                             let get_channel_cmd = serde_json::json!({
                                 "cmd": "GET_CHANNEL",
                                 "nonce": nonce,
                                 "args": { "channel_id": new_ch_id }
                             });
-                            *state.channel_refresh.write().await =
-                                Some((nonce.clone(), old_ch_id));
+                            *state.channel_refresh.write().await = Some((nonce.clone(), old_ch_id));
                             write
                                 .send(Message::Text(get_channel_cmd.to_string()))
                                 .await
@@ -853,7 +891,8 @@ impl DiscordRpcClient {
                     }
                     if evt == Some("SPEAKING_START") || evt == Some("SPEAKING_STOP") {
                         if let Some(ref d) = data {
-                            if let Ok(speaking) = serde_json::from_value::<SpeakingData>(d.clone()) {
+                            if let Ok(speaking) = serde_json::from_value::<SpeakingData>(d.clone())
+                            {
                                 if let Some(user_id) = speaking.user_id {
                                     debug!("[discord-rpc] {:?} user_id={}", evt, user_id);
                                     let event = if evt == Some("SPEAKING_START") {
@@ -990,7 +1029,8 @@ impl DiscordRpcClient {
             });
 
             ipc.send_json(&auth_cmd.to_string()).await?;
-            let auth_response = Self::ipc_read_response(&mut ipc, &nonce).await
+            let auth_response = Self::ipc_read_response(&mut ipc, &nonce)
+                .await
                 .map_err(&mut send_err)?;
             let code = match auth_response.get("code").and_then(|v| v.as_str()) {
                 Some(c) => c.to_string(),
@@ -1024,14 +1064,20 @@ impl DiscordRpcClient {
                 )));
             }
 
-            let token_data: serde_json::Value = token_response.json().await.map_err(|e| send_err(e.to_string()))?;
+            let token_data: serde_json::Value = token_response
+                .json()
+                .await
+                .map_err(|e| send_err(e.to_string()))?;
             let access_token = match token_data.get("access_token").and_then(|v| v.as_str()) {
                 Some(t) => t.to_string(),
                 None => {
                     return Err(send_err("No access_token in response. Check that Redirect URI in OAuth2 matches exactly (e.g. https://localhost).".into()));
                 }
             };
-            let refresh_token_to_save = token_data.get("refresh_token").and_then(|v| v.as_str()).map(String::from);
+            let refresh_token_to_save = token_data
+                .get("refresh_token")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             (access_token, refresh_token_to_save)
         };
 
@@ -1046,7 +1092,8 @@ impl DiscordRpcClient {
         });
 
         ipc.send_json(&auth_cmd.to_string()).await?;
-        let auth_response = Self::ipc_read_response(&mut ipc, &nonce).await
+        let auth_response = Self::ipc_read_response(&mut ipc, &nonce)
+            .await
             .map_err(&mut send_err)?;
         let self_user_id = auth_response
             .get("user")
@@ -1065,7 +1112,8 @@ impl DiscordRpcClient {
 
         ipc.send_json(&get_channel_cmd.to_string()).await?;
         info!("[discord-rpc] Getting voice channel...");
-        let channel_response = Self::ipc_read_response(&mut ipc, &nonce).await
+        let channel_response = Self::ipc_read_response(&mut ipc, &nonce)
+            .await
             .map_err(&mut send_err)?;
         let channel_id = match channel_response.get("id").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
@@ -1095,7 +1143,8 @@ impl DiscordRpcClient {
                 "args": { "guild_id": gid }
             });
             ipc.send_json(&get_guild_cmd.to_string()).await?;
-            Self::ipc_read_response(&mut ipc, &nonce).await
+            Self::ipc_read_response(&mut ipc, &nonce)
+                .await
                 .ok()
                 .and_then(|d| d.get("name").and_then(|v| v.as_str()).map(String::from))
         } else {
@@ -1103,7 +1152,10 @@ impl DiscordRpcClient {
         };
 
         let mut user_labels = std::collections::HashMap::new();
-        if let Some(states) = channel_response.get("voice_states").and_then(|v| v.as_array()) {
+        if let Some(states) = channel_response
+            .get("voice_states")
+            .and_then(|v| v.as_array())
+        {
             for vs in states {
                 let user = vs.get("user");
                 let user_id = user
@@ -1122,7 +1174,9 @@ impl DiscordRpcClient {
             }
         }
         if let Some(ref uid) = self_user_id {
-            user_labels.entry(uid.clone()).or_insert_with(|| uid.clone());
+            user_labels
+                .entry(uid.clone())
+                .or_insert_with(|| uid.clone());
         }
 
         set_channel_info(ChannelInfo {
@@ -1271,9 +1325,8 @@ impl DiscordRpcClient {
                                                             "evt": evt,
                                                             "args": { "channel_id": old_id }
                                                         });
-                                                        let _ = ipc
-                                                            .send_json(&unsub.to_string())
-                                                            .await;
+                                                        let _ =
+                                                            ipc.send_json(&unsub.to_string()).await;
                                                     }
                                                 }
                                                 for evt in ["SPEAKING_START", "SPEAKING_STOP"] {
@@ -1285,7 +1338,9 @@ impl DiscordRpcClient {
                                                         "args": { "channel_id": new_channel_id }
                                                     });
                                                     ipc.send_json(&sub_cmd.to_string()).await?;
-                                                    let _ = Self::ipc_read_response(&mut ipc, &snonce).await?;
+                                                    let _ =
+                                                        Self::ipc_read_response(&mut ipc, &snonce)
+                                                            .await?;
                                                 }
                                             }
                                         }
@@ -1313,8 +1368,7 @@ impl DiscordRpcClient {
                                 *state.current_channel_id.write().await = None;
                                 info!("[discord-rpc] User left voice channel (IPC)");
                             } else if let Some(new_ch_id) = ch_id {
-                                let old_ch_id =
-                                    state.current_channel_id.read().await.clone();
+                                let old_ch_id = state.current_channel_id.read().await.clone();
                                 let nonce = Uuid::new_v4().to_string();
                                 let get_channel_cmd = serde_json::json!({
                                     "cmd": "GET_CHANNEL",
@@ -1328,7 +1382,9 @@ impl DiscordRpcClient {
                         }
                         if evt == Some("SPEAKING_START") || evt == Some("SPEAKING_STOP") {
                             if let Some(ref d) = data {
-                                if let Ok(speaking) = serde_json::from_value::<SpeakingData>(d.clone()) {
+                                if let Ok(speaking) =
+                                    serde_json::from_value::<SpeakingData>(d.clone())
+                                {
                                     if let Some(user_id) = speaking.user_id {
                                         debug!("[discord-rpc] {:?} user_id={}", evt, user_id);
                                         let event = if evt == Some("SPEAKING_START") {

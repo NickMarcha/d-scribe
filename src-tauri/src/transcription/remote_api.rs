@@ -42,9 +42,7 @@ pub async fn transcribe_via_api(
         .text("model", config.model.clone());
 
     let client = reqwest::Client::new();
-    let mut req = client
-        .post(&config.base_url)
-        .multipart(form);
+    let mut req = client.post(&config.base_url).multipart(form);
 
     if let Some(ref key) = config.api_key {
         req = req.bearer_auth(key);

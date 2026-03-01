@@ -54,3 +54,6 @@ wasapi = "0.22"
 [target.'cfg(not(windows))'.dependencies]
 cpal = "0.15"
 
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+

@@ -11,11 +11,7 @@ lazy_static::lazy_static! {
 
 /// Generate session/project name from template.
 /// Placeholders: {guild}, {channel}, {timestamp}, {date}, {time}
-fn format_session_id(
-    template: &str,
-    guild: Option<&str>,
-    channel: Option<&str>,
-) -> String {
+fn format_session_id(template: &str, guild: Option<&str>, channel: Option<&str>) -> String {
     let now = chrono::Utc::now();
     let timestamp = now.timestamp().to_string();
     let date = now.format("%Y-%m-%d").to_string();
@@ -28,7 +24,10 @@ fn format_session_id(
     s = s.replace("{date}", &date);
     s = s.replace("{time}", &time);
     // Sanitize for filesystem: replace invalid chars
-    s.replace(|c: char| matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'), "_")
+    s.replace(
+        |c: char| matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'),
+        "_",
+    )
 }
 
 /// A single segment of speech from a speaker.
@@ -217,7 +216,9 @@ pub fn record_speaking_event(is_start: bool, user_id: String) {
                 let gap = elapsed.saturating_sub(pending.stop_ms);
                 if gap <= buffer {
                     // Same utterance - merge: keep speaking, extend the segment
-                    session.open_segments.insert(user_id.clone(), pending.start_ms);
+                    session
+                        .open_segments
+                        .insert(user_id.clone(), pending.start_ms);
                 } else {
                     // Gap exceeded buffer - finalize previous, start new
                     let speaker_name = session.user_labels.get(&user_id).cloned();

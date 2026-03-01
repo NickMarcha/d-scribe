@@ -68,13 +68,19 @@ pub async fn send_pong(pipe: &mut IpcConnection, payload: &str) -> Result<(), St
     send_frame(&mut pipe.pipe, OPCODE_PONG, payload).await
 }
 
-async fn send_frame(pipe: &mut tokio::net::windows::named_pipe::NamedPipeClient, opcode: u32, json: &str) -> Result<(), String> {
+async fn send_frame(
+    pipe: &mut tokio::net::windows::named_pipe::NamedPipeClient,
+    opcode: u32,
+    json: &str,
+) -> Result<(), String> {
     let len = json.len() as u32;
     let mut header = [0u8; 8];
     header[0..4].copy_from_slice(&opcode.to_le_bytes());
     header[4..8].copy_from_slice(&len.to_le_bytes());
     pipe.write_all(&header).await.map_err(|e| e.to_string())?;
-    pipe.write_all(json.as_bytes()).await.map_err(|e| e.to_string())?;
+    pipe.write_all(json.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
     pipe.flush().await.map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -107,7 +113,10 @@ impl IpcConnection {
         }
 
         let mut buf = vec![0u8; len];
-        self.pipe.read_exact(&mut buf).await.map_err(|e| e.to_string())?;
+        self.pipe
+            .read_exact(&mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
         let json = String::from_utf8(buf).map_err(|e| e.to_string())?;
         Ok(Some((opcode, json)))
     }

@@ -5,9 +5,7 @@ use tauri::{AppHandle, Manager};
 
 /// Get the app data directory (e.g. %APPDATA%/d-scribe on Windows).
 pub fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())
+    app.path().app_data_dir().map_err(|e| e.to_string())
 }
 
 /// Get the projects directory, creating it if necessary.

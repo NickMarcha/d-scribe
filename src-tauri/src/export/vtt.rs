@@ -13,21 +13,14 @@ fn ms_to_vtt_time(ms: u64) -> String {
     format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
 }
 
-pub fn write_vtt(
-    path: &Path,
-    segments: &[SessionSegment],
-    texts: &[String],
-) -> Result<(), String> {
+pub fn write_vtt(path: &Path, segments: &[SessionSegment], texts: &[String]) -> Result<(), String> {
     let mut file = File::create(path).map_err(|e| e.to_string())?;
 
     writeln!(file, "WEBVTT").map_err(|e| e.to_string())?;
     writeln!(file).map_err(|e| e.to_string())?;
 
     for (seg, text) in segments.iter().zip(texts.iter()) {
-        let speaker = seg
-            .speaker_name
-            .as_deref()
-            .unwrap_or(&seg.user_id);
+        let speaker = seg.speaker_name.as_deref().unwrap_or(&seg.user_id);
         let line = format!("[{}]: {}", speaker, text);
         writeln!(
             file,

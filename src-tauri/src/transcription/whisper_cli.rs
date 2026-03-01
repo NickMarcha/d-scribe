@@ -26,19 +26,13 @@ impl WhisperCliBackend {
     /// Transcribe using system binary (e.g. from PATH or custom path).
     /// Returns the raw transcribed text.
     pub fn transcribe_file(&self, audio_path: &Path) -> Result<String, String> {
-        let model = self
-            .model_path
-            .as_ref()
-            .ok_or("No model path configured")?;
+        let model = self.model_path.as_ref().ok_or("No model path configured")?;
         let model_path = Path::new(model);
         if !model_path.exists() {
             return Err(format!("Model not found: {}", model));
         }
 
-        let binary = self
-            .binary_path
-            .as_deref()
-            .unwrap_or("main");
+        let binary = self.binary_path.as_deref().unwrap_or("main");
         let mut args: Vec<&str> = vec![
             "-m",
             model_path.to_str().unwrap(),
@@ -74,7 +68,9 @@ impl TranscriptionBackend for WhisperCliBackend {
     }
 
     fn is_available(&self) -> bool {
-        self.model_path.as_ref().map_or(false, |p| Path::new(p).exists())
+        self.model_path
+            .as_ref()
+            .map_or(false, |p| Path::new(p).exists())
     }
 
     fn transcribe(&self, audio_path: &Path) -> Result<Vec<TranscriptSegment>, String> {

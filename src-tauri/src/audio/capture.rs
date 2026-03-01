@@ -109,7 +109,9 @@ fn capture_to_wav(
         None,
     );
 
-    let (_def_time, min_time) = audio_client.get_device_period().map_err(|e| e.to_string())?;
+    let (_def_time, min_time) = audio_client
+        .get_device_period()
+        .map_err(|e| e.to_string())?;
 
     let mode = wasapi::StreamMode::EventsShared {
         autoconvert: true,
@@ -120,14 +122,17 @@ fn capture_to_wav(
         .initialize_client(&desired_format, &wasapi::Direction::Capture, &mode)
         .map_err(|e| e.to_string())?;
 
-    let h_event = audio_client.set_get_eventhandle().map_err(|e| e.to_string())?;
-    let capture_client = audio_client.get_audiocaptureclient().map_err(|e| e.to_string())?;
+    let h_event = audio_client
+        .set_get_eventhandle()
+        .map_err(|e| e.to_string())?;
+    let capture_client = audio_client
+        .get_audiocaptureclient()
+        .map_err(|e| e.to_string())?;
 
     let blockalign = desired_format.get_blockalign();
     let buffer_frame_count = audio_client.get_buffer_size().map_err(|e| e.to_string())?;
-    let mut sample_queue: VecDeque<u8> = VecDeque::with_capacity(
-        blockalign as usize * (1024 + 2 * buffer_frame_count as usize),
-    );
+    let mut sample_queue: VecDeque<u8> =
+        VecDeque::with_capacity(blockalign as usize * (1024 + 2 * buffer_frame_count as usize));
 
     let mut writer = hound::WavWriter::create(
         path,

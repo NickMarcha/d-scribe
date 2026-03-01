@@ -13,18 +13,11 @@ fn ms_to_srt_time(ms: u64) -> String {
     format!("{:02}:{:02}:{:02},{:03}", hours, mins, secs, millis)
 }
 
-pub fn write_srt(
-    path: &Path,
-    segments: &[SessionSegment],
-    texts: &[String],
-) -> Result<(), String> {
+pub fn write_srt(path: &Path, segments: &[SessionSegment], texts: &[String]) -> Result<(), String> {
     let mut file = File::create(path).map_err(|e| e.to_string())?;
 
     for (i, (seg, text)) in segments.iter().zip(texts.iter()).enumerate() {
-        let speaker = seg
-            .speaker_name
-            .as_deref()
-            .unwrap_or(&seg.user_id);
+        let speaker = seg.speaker_name.as_deref().unwrap_or(&seg.user_id);
         let line = format!("[{}]: {}", speaker, text);
         writeln!(file, "{}", i + 1).map_err(|e| e.to_string())?;
         writeln!(

@@ -73,7 +73,11 @@ impl From<ProjectFile> for SessionState {
     }
 }
 
-pub fn save_project(_app: &tauri::AppHandle, path: &Path, state: &SessionState) -> Result<(), String> {
+pub fn save_project(
+    _app: &tauri::AppHandle,
+    path: &Path,
+    state: &SessionState,
+) -> Result<(), String> {
     let file = ProjectFile::from(state.clone());
     let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())?;
@@ -132,7 +136,10 @@ pub fn purge_old_recent(app: &tauri::AppHandle, retention_days: u64) -> Result<u
     for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        if path.extension().map_or(false, |e| e == "json" || e == "dscribe") {
+        if path
+            .extension()
+            .map_or(false, |e| e == "json" || e == "dscribe")
+        {
             if let Ok(json) = std::fs::read_to_string(&path) {
                 if let Ok(meta) = serde_json::from_str::<ProjectMetaPartial>(&json) {
                     if let Some(created) = meta.created_at {
@@ -184,7 +191,11 @@ fn collect_projects_from_dir(dir: &Path) -> Result<Vec<ProjectMeta>, String> {
     for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |e| e == "json" || e == "dscribe") {
+        if path.is_file()
+            && path
+                .extension()
+                .map_or(false, |e| e == "json" || e == "dscribe")
+        {
             let path_str = path.to_string_lossy().into_owned();
             let name = path
                 .file_stem()
@@ -223,11 +234,7 @@ pub fn list_projects_with_meta(app: &tauri::AppHandle) -> Result<Vec<ProjectMeta
 
 /// Generate project name from template.
 /// Placeholders: {guild}, {channel}, {timestamp}, {date}, {time}
-pub fn format_project_name(
-    template: &str,
-    guild: Option<&str>,
-    channel: Option<&str>,
-) -> String {
+pub fn format_project_name(template: &str, guild: Option<&str>, channel: Option<&str>) -> String {
     let now = chrono::Utc::now();
     let timestamp = now.timestamp().to_string();
     let date = now.format("%Y-%m-%d").to_string();
