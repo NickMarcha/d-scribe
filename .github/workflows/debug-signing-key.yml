@@ -15,7 +15,7 @@ jobs:
           $key = $env:TAURI_SIGNING_PRIVATE_KEY
           Write-Host "Secret length (chars): $($key.Length)"
           Write-Host "Secret length (bytes): $([System.Text.Encoding]::UTF8.GetByteCount($key))"
-          Write-Host "Contains newline: $($key -match \"`n\")"
+          Write-Host "Contains newline: $($key.Contains([char]10))"
           Write-Host "Starts with 'untrusted': $($key.StartsWith('untrusted comment'))"
           if ($key.Length -eq 0) { Write-Host "ERROR: Secret is EMPTY" ; exit 1 }
           if ($key.Length -lt 100) { Write-Host "WARNING: Secret seems too short (minisign keys are ~200+ chars)" }
