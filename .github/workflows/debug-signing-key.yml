@@ -1,0 +1,36 @@
+# Debug workflow to verify TAURI_SIGNING_PRIVATE_KEY is accessible.
+# Run manually from Actions tab. Delete or disable after debugging.
+# WARNING: Do not print the actual key - GitHub masks secrets but we avoid any exposure.
+name: debug-signing-key
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: windows-latest
+    steps:
+      - name: Check secret metadata
+        run: |
+          $key = $env:TAURI_SIGNING_PRIVATE_KEY
+          Write-Host "Secret length (chars): $($key.Length)"
+          Write-Host "Secret length (bytes): $([System.Text.Encoding]::UTF8.GetByteCount($key))"
+          Write-Host "Contains newline: $($key -match \"`n\")"
+          Write-Host "Starts with 'untrusted': $($key.StartsWith('untrusted comment'))"
+          if ($key.Length -eq 0) { Write-Host "ERROR: Secret is EMPTY" ; exit 1 }
+          if ($key.Length -lt 100) { Write-Host "WARNING: Secret seems too short (minisign keys are ~200+ chars)" }
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+      - name: Write to file and verify
+        run: |
+          $keyDir = "$env:USERPROFILE\.tauri"
+          New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+          $path = "$keyDir\myapp.key"
+          [System.IO.File]::WriteAllText($path, $env:TAURI_SIGNING_PRIVATE_KEY)
+          $fi = Get-Item $path
+          Write-Host "File written: $path"
+          Write-Host "File size (bytes): $($fi.Length)"
+          Write-Host "File exists: $($fi.Exists)"
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
