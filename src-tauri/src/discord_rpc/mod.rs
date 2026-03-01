@@ -17,6 +17,15 @@ use std::sync::Mutex;
 
 lazy_static! {
     static ref CHANNEL_INFO: Mutex<Option<ChannelInfo>> = Mutex::new(None);
+    static ref RPC_CONNECTED: Mutex<bool> = Mutex::new(false);
+}
+
+pub fn set_rpc_connected(connected: bool) {
+    *RPC_CONNECTED.lock().unwrap() = connected;
+}
+
+pub fn is_rpc_connected() -> bool {
+    *RPC_CONNECTED.lock().unwrap()
 }
 
 pub fn set_channel_info(info: ChannelInfo) {

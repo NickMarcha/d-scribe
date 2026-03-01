@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<!--Background-->
+  <rect x="16" y="16" width="480" height="480" rx="48" ry="48" fill="white" stroke="black" stroke-width="32"/>
+<!--Stylized D-->
+  <style>
+    tspan { white-space:pre } 
+		.t0 { font-size: 400px;fill: #000000;font-weight: 400;font-family: &quot;DevroyeUnicode&quot;, &quot;Devroye Unicode&quot; }
+  </style>
+  <text id="D" transform="translate(30,410)scale(1,1.3)">
+		<tspan x="0" y="0" class="t0">D</tspan><tspan y="0" class="t0">
+</tspan>	</text>
+<!--Imported quill-->
+  <g transform="translate(250,470.000000) scale(0.0300000,-0.0300000)" fill="#000000" stroke="none">
+    <path d="M7337 12743 c-29 -26 -39 -33 -23 -15 17 17 26 32 22 32 -17 0 -171
+-82 -240 -127 -629 -418 -1753 -1784 -3183 -3868 -858 -1251 -1824 -2772
+-2211 -3480 -146 -268 -252 -596 -252 -778 1 -177 79 -324 224 -417 l63 -41
+-94 -177 c-197 -368 -373 -711 -587 -1142 -651 -1308 -1003 -2200 -1051 -2662
+-7 -64 -6 -68 13 -68 52 0 97 92 179 360 105 348 204 464 447 527 l69 18 117
+295 c311 787 639 1537 1010 2311 72 151 156 326 187 391 l55 116 92 35 c336
+128 607 181 926 181 341 -1 602 -59 990 -221 145 -61 144 -61 178 -11 80 120
+310 552 577 1088 1470 2942 2411 5661 2559 7390 29 338 29 328 -3 298 -11 -10
+-13 -10 -7 0 13 23 -5 12 -57 -35z"/>
+  </g>
+</svg>

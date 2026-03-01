@@ -59,6 +59,9 @@ pub struct SessionState {
     pub user_labels: std::collections::HashMap<String, String>,
     pub segments: Vec<SessionSegment>,
     pub transcript_texts: Vec<String>,
+    /// Original live transcription output, preserved when re-transcribing or manually editing.
+    #[serde(default)]
+    pub live_transcript_texts: Option<Vec<String>>,
     pub audio_paths: SessionAudioPaths,
 }
 
@@ -292,6 +295,7 @@ pub fn stop_session(audio_paths: SessionAudioPaths) -> Option<SessionState> {
             user_labels: session.user_labels,
             segments: session.segments,
             transcript_texts: vec![], // Filled by transcription or manual edit
+            live_transcript_texts: None, // Filled by lib when stopping live recording
             audio_paths,
         })
     } else {

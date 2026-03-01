@@ -67,3 +67,54 @@ pub async fn transcribe_via_api(
 
     Ok(text)
 }
+
+/// List available models from an OpenAI-compatible API.
+/// GET {host}{models_path || "/v1/models"} with optional Bearer auth.
+pub async fn list_models(
+    host: &str,
+    models_path: Option<&str>,
+    api_key: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let host = host.trim().trim_end_matches('/');
+    let path = models_path
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| {
+            let s = s.trim();
+            if s.starts_with('/') {
+                s.to_string()
+            } else {
+                format!("/{}", s)
+            }
+        })
+        .unwrap_or_else(|| "/v1/models".to_string());
+    let url = format!("{}{}", host, path);
+
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if let Some(key) = api_key {
+        if !key.trim().is_empty() {
+            req = req.bearer_auth(key.trim());
+        }
+    }
+
+    let response = req.send().await.map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status, body));
+    }
+
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let data = json
+        .get("data")
+        .and_then(|v| v.as_array())
+        .ok_or("Expected { data: [...] } in response")?;
+
+    let ids: Vec<String> = data
+        .iter()
+        .filter_map(|obj| obj.get("id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+
+    Ok(ids)
+}

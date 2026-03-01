@@ -26,6 +26,8 @@ pub struct ProjectFile {
     pub user_labels: std::collections::HashMap<String, String>,
     pub segments: Vec<SessionSegment>,
     pub transcript_texts: Vec<String>,
+    #[serde(default)]
+    pub live_transcript_texts: Option<Vec<String>>,
     pub audio_paths: SessionAudioPaths,
 }
 
@@ -44,6 +46,7 @@ impl From<SessionState> for ProjectFile {
             user_labels: s.user_labels,
             segments: s.segments,
             transcript_texts: s.transcript_texts,
+            live_transcript_texts: s.live_transcript_texts,
             audio_paths: s.audio_paths,
         }
     }
@@ -64,6 +67,7 @@ impl From<ProjectFile> for SessionState {
             user_labels: p.user_labels,
             segments: p.segments,
             transcript_texts: p.transcript_texts,
+            live_transcript_texts: p.live_transcript_texts,
             audio_paths: p.audio_paths,
         }
     }

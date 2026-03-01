@@ -139,7 +139,7 @@ export function StatsPanel({ segments, texts, collapsed, onToggleCollapsed }: St
   return (
     <div className={`stats-panel ${collapsed ? "stats-panel-collapsed" : ""}`}>
       <button type="button" className="stats-panel-toggle" onClick={onToggleCollapsed}>
-        {collapsed ? "Show stats" : "Hide stats"}
+        {collapsed ? "Stats" : "Hide stats"}
       </button>
       {!collapsed && (
         <div className="stats-panel-content">

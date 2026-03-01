@@ -2,7 +2,7 @@
 //! falls back to WebSocket on other platforms or if IPC fails.
 
 use crate::discord_rpc::events::{ChannelInfo, SpeakingEvent, VoiceChannel};
-use crate::discord_rpc::{clear_channel_info, set_channel_info};
+use crate::discord_rpc::{clear_channel_info, set_channel_info, set_rpc_connected};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use serde::Deserialize;
@@ -688,6 +688,7 @@ impl DiscordRpcClient {
         }
 
         *state.connection_state.write().await = RpcConnectionState::Subscribed;
+        set_rpc_connected(true);
 
         // Process incoming messages
         while let Some(msg) = read.next().await {
@@ -872,12 +873,14 @@ impl DiscordRpcClient {
                             .unwrap_or_else(|| "Unknown error".into());
                         *state.connection_state.write().await =
                             RpcConnectionState::Error(err_msg.clone());
+                        set_rpc_connected(false);
                         return Err(err_msg);
                     }
                 }
             }
         }
 
+        set_rpc_connected(false);
         Ok(())
     }
 
@@ -1173,6 +1176,7 @@ impl DiscordRpcClient {
         }
 
         *state.connection_state.write().await = RpcConnectionState::Subscribed;
+        set_rpc_connected(true);
 
         // Process incoming messages - we need to handle the pending responses from SUBSCRIBE
         // and then the SPEAKING_START/STOP events. The SUBSCRIBE responses will complete the
@@ -1344,6 +1348,7 @@ impl DiscordRpcClient {
                                 .unwrap_or_else(|| "Unknown error".into());
                             *state.connection_state.write().await =
                                 RpcConnectionState::Error(err_msg.clone());
+                            set_rpc_connected(false);
                             return Err(err_msg);
                         }
                     }
@@ -1355,6 +1360,7 @@ impl DiscordRpcClient {
             }
         }
 
+        set_rpc_connected(false);
         Ok(())
     }
 

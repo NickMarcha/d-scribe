@@ -7,14 +7,14 @@ mod session;
 mod transcription;
 
 use log::{debug, warn};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use audio::{start_audio_capture, stop_audio_capture, AudioCaptureHandle};
-use discord_rpc::{get_channel_info, save_tokens, load_tokens, DiscordRpcClient};
+use discord_rpc::{get_channel_info, is_rpc_connected, save_tokens, load_tokens, DiscordRpcClient};
 use export::{export_srt, export_vtt};
 use paths::{app_data_dir, discord_tokens_path, models_dir, projects_dir};
 use project::{auto_save_project, delete_project, format_project_name, list_projects, list_projects_with_meta, load_project, purge_old_recent, save_project};
 use tauri_plugin_shell::ShellExt;
-use transcription::{download_model, extract_segment, transcribe_via_api, write_wav_from_samples, RemoteTranscriptionConfig, WhisperCliBackend};
+use transcription::{download_model_with_progress, extract_segment, list_installed_model_names, list_models, resolve_model_path, transcribe_via_api, write_wav_from_samples, RemoteTranscriptionConfig, WhisperCliBackend};
 use session::{clear_live_segment_tx, flush_pending_if_elapsed, record_speaking_event, set_live_segment_tx, start_session, stop_session, SessionAudioPaths, SessionSegment, SessionState};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -118,13 +118,37 @@ async fn discord_rpc_auto_reconnect(app: tauri::AppHandle) -> Result<bool, Strin
     Ok(true)
 }
 
+async fn is_discord_running() -> bool {
+    for port in 6463..6473 {
+        let addr = (std::net::IpAddr::from([127, 0, 0, 1]), port);
+        if tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await
+        .map(|r| r.is_ok())
+        .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 #[tauri::command]
-fn discord_rpc_connection_state() -> Result<String, String> {
-    Ok(if get_channel_info().is_some() {
-        "Connected".into()
+async fn discord_rpc_connection_state() -> Result<serde_json::Value, String> {
+    let state = if get_channel_info().is_some() {
+        "InVoice"
+    } else if is_rpc_connected() {
+        "Idle"
     } else {
-        "Disconnected".into()
-    })
+        "Disconnected"
+    };
+    let discord_running = is_discord_running().await;
+    Ok(serde_json::json!({
+        "state": state,
+        "discord_running": discord_running
+    }))
 }
 
 static AUDIO_HANDLE: Mutex<Option<AudioCaptureHandle>> = Mutex::new(None);
@@ -145,6 +169,7 @@ fn start_recording(
     live_remote_base_url: Option<String>,
     live_remote_model: Option<String>,
     live_remote_api_key: Option<String>,
+    live_language_code: Option<String>,
 ) -> Result<(), String> {
     let channel_info = get_channel_info().ok_or("Not connected to Discord. Connect in Settings first.")?;
     let user_labels: std::collections::HashMap<String, String> = channel_info.user_labels.clone();
@@ -188,6 +213,7 @@ fn start_recording(
             )
         });
         let model_path = live_model_path.clone();
+        let language_code = live_language_code.clone();
         let whisper_path = (!use_remote).then(|| {
             std::env::current_exe().ok().and_then(|p| {
                 let dir = p.parent()?;
@@ -268,10 +294,28 @@ fn start_recording(
                         let exe = exe.clone();
                         let seg_path_buf = seg_path.clone();
                         let model_str = m.to_string();
+                        let lang = language_code.clone();
                         tauri::async_runtime::spawn_blocking(move || {
                             let of_base = seg_path_buf.with_extension("");
+                            let mut args: Vec<String> = vec![
+                                "-m".into(),
+                                model_str,
+                                "-f".into(),
+                                seg_path_buf.to_string_lossy().into_owned(),
+                            ];
+                            if let Some(code) = lang {
+                                args.push("-l".into());
+                                args.push(code);
+                            }
+                            args.extend([
+                                "-np".into(),
+                                "-nt".into(),
+                                "-otxt".into(),
+                                "-of".into(),
+                                of_base.to_string_lossy().into_owned(),
+                            ]);
                             let output = std::process::Command::new(&exe)
-                                .args(["-m", &model_str, "-f", &seg_path_buf.to_string_lossy(), "-np", "-nt", "-otxt", "-of", &of_base.to_string_lossy()])
+                                .args(&args)
                                 .output();
                             match output {
                                 Ok(out) if out.status.success() => {
@@ -304,8 +348,25 @@ fn start_recording(
                         let model = model_path.as_ref().filter(|p| std::path::Path::new(p).exists());
                         if let Some(m) = model {
                             let of_base = seg_path.with_extension("");
+                            let mut sidecar_args: Vec<String> = vec![
+                                "-m".into(),
+                                m.clone(),
+                                "-f".into(),
+                                seg_path.to_string_lossy().into_owned(),
+                            ];
+                            if let Some(ref code) = language_code {
+                                sidecar_args.push("-l".into());
+                                sidecar_args.push(code.clone());
+                            }
+                            sidecar_args.extend([
+                                "-np".into(),
+                                "-nt".into(),
+                                "-otxt".into(),
+                                "-of".into(),
+                                of_base.to_string_lossy().into_owned(),
+                            ]);
                             let output = sidecar
-                                .args(["-m", m, "-f", &seg_path.to_string_lossy(), "-np", "-nt", "-otxt", "-of", &of_base.to_string_lossy()])
+                                .args(sidecar_args)
                                 .output()
                                 .await;
                             if let Ok(out) = output {
@@ -378,10 +439,12 @@ fn stop_recording(_app: tauri::AppHandle) -> Result<Option<SessionState>, String
     if was_live {
         let texts = std::mem::take(&mut *LIVE_TRANSCRIPT_TEXTS.lock().unwrap());
         if let Some(ref mut s) = state {
-            s.transcript_texts = texts;
-            while s.transcript_texts.len() < s.segments.len() {
-                s.transcript_texts.push(String::new());
+            let mut texts = texts;
+            while texts.len() < s.segments.len() {
+                texts.push(String::new());
             }
+            s.live_transcript_texts = Some(texts.clone());
+            s.transcript_texts = texts;
         }
     }
     Ok(state)
@@ -467,7 +530,55 @@ async fn download_model_command(
     model_name: String,
 ) -> Result<String, String> {
     let models_dir = models_dir(&app)?;
-    download_model(&models_dir, &model_name).await
+    let app_emit = app.clone();
+    let model_name_emit = model_name.clone();
+    download_model_with_progress(&models_dir, &model_name, move |downloaded, total| {
+        let _ = app_emit.emit(
+            "download-progress",
+            serde_json::json!({
+                "modelName": model_name_emit,
+                "bytesDownloaded": downloaded,
+                "totalBytes": total,
+            }),
+        );
+    })
+    .await
+}
+
+#[tauri::command]
+fn resolve_model_path_command(app: tauri::AppHandle, model_name: String) -> Result<Option<String>, String> {
+    let dir = models_dir(&app)?;
+    Ok(resolve_model_path(&dir, &model_name).map(|p| p.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn list_installed_model_names_command(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = models_dir(&app)?;
+    Ok(list_installed_model_names(&dir))
+}
+
+#[tauri::command]
+fn open_models_dir_command(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = models_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_remote_models_command(
+    host: String,
+    models_path: Option<String>,
+    api_key: Option<String>,
+) -> Result<Vec<String>, String> {
+    list_models(
+        &host,
+        models_path.as_deref(),
+        api_key.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -479,6 +590,7 @@ async fn transcribe_session_command(
     remote_base_url: Option<String>,
     remote_model: Option<String>,
     remote_api_key: Option<String>,
+    language_code: Option<String>,
 ) -> Result<SessionState, String> {
     let loopback_path = state
         .audio_paths
@@ -600,18 +712,19 @@ async fn transcribe_session_command(
             debug!("[transcribe] segment {}: using direct Command, exe={:?}", i, whisper_exe);
             let txt_path = segment_path.with_extension("txt");
             let of_base = segment_path.with_extension("");
+            let mut args: Vec<&str> = vec![
+                "-m",
+                model_path_buf.to_str().unwrap(),
+                "-f",
+                &segment_path_str,
+            ];
+            if let Some(ref code) = language_code {
+                args.push("-l");
+                args.push(code);
+            }
+            args.extend(["-np", "-nt", "-otxt", "-of", of_base.to_str().unwrap()]);
             let output = std::process::Command::new(whisper_exe)
-                .args([
-                    "-m",
-                    model_path_buf.to_str().unwrap(),
-                    "-f",
-                    &segment_path_str,
-                    "-np",
-                    "-nt",
-                    "-otxt",
-                    "-of",
-                    of_base.to_str().unwrap(),
-                ])
+                .args(args)
                 .output()
                 .map_err(|e| format!("Failed to run whisper: {}", e))?;
             let exit = output.status.code().unwrap_or(-1);
@@ -670,18 +783,26 @@ async fn transcribe_session_command(
             })?;
             // Use -otxt -of to write to file: sidecar stdout capture can be unreliable
             let txt_path = segment_path.with_extension("txt");
+            let of_base_str = segment_path.with_extension("").to_string_lossy().into_owned();
+            let mut sidecar_args: Vec<String> = vec![
+                "-m".into(),
+                model_path_buf.to_string_lossy().into_owned(),
+                "-f".into(),
+                segment_path_str.clone(),
+            ];
+            if let Some(ref code) = language_code {
+                sidecar_args.push("-l".into());
+                sidecar_args.push(code.clone());
+            }
+            sidecar_args.extend([
+                "-np".into(),
+                "-nt".into(),
+                "-otxt".into(),
+                "-of".into(),
+                of_base_str,
+            ]);
             let output = sidecar
-                .args([
-                    "-m",
-                    &model_path_buf.to_string_lossy(),
-                    "-f",
-                    &segment_path_str,
-                    "-np",
-                    "-nt",
-                    "-otxt",
-                    "-of",
-                    &segment_path.with_extension("").to_string_lossy(),
-                ])
+                .args(sidecar_args)
                 .output()
                 .await
                 .map_err(|e| format!("Failed to run whisper: {}", e))?;
@@ -736,7 +857,11 @@ async fn transcribe_session_command(
             }
         } else {
             debug!("[transcribe] segment {}: using WhisperCliBackend fallback", i);
-            let backend = WhisperCliBackend::new(Some(model_path_buf.to_string_lossy().into_owned()), None);
+            let backend = WhisperCliBackend::new(
+                Some(model_path_buf.to_string_lossy().into_owned()),
+                None,
+                language_code.clone(),
+            );
             backend.transcribe_file(&segment_path)
         };
 
@@ -868,6 +993,22 @@ pub fn run() {
                     log::info!("[d-scribe] Auto-reconnected to Discord");
                 }
             });
+            // Set window icon explicitly (helps in dev mode when PE icon may not show)
+            let handle = app.handle().clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(win) = handle.get_webview_window("main") {
+                    let icon_path = std::env::current_exe()
+                        .ok()
+                        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+                        .and_then(|target_dir| target_dir.parent().map(|p| p.to_path_buf()))
+                        .map(|src_tauri| src_tauri.join("icons").join("icon.ico"));
+                    if let Some(path) = icon_path.filter(|p| p.exists()) {
+                        if let Ok(icon) = tauri::image::Image::from_path(&path) {
+                            let _ = win.set_icon(icon.to_owned());
+                        }
+                    }
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -892,6 +1033,10 @@ pub fn run() {
             export_transcript,
             list_models_command,
             download_model_command,
+            resolve_model_path_command,
+            list_installed_model_names_command,
+            open_models_dir_command,
+            list_remote_models_command,
             transcribe_session_command,
         ])
         .run(tauri::generate_context!())

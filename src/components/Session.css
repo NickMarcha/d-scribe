@@ -195,6 +195,30 @@
   flex-wrap: wrap;
 }
 
+.language-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.language-toggle button {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.language-toggle button.active {
+  background: #646cff;
+  color: white;
+  border-color: #646cff;
+}
+
+.language-toggle button:hover:not(.active) {
+  background: rgba(100, 108, 255, 0.1);
+}
+
 .form-group {
   margin-bottom: 1rem;
 }

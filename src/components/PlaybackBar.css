@@ -1,0 +1,91 @@
+.playback-bar {
+  position: sticky;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 1rem;
+  z-index: 10;
+}
+
+.playback-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.playback-bar-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.playback-bar-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.playback-bar-time {
+  font-size: 0.9rem;
+  color: #666;
+  font-variant-numeric: tabular-nums;
+}
+
+.playback-bar-expand {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: #646cff;
+}
+
+.playback-bar-expand:hover {
+  background: rgba(100, 108, 255, 0.1);
+  border-radius: 4px;
+}
+
+.playback-bar-details {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+.playback-bar-details .playback-mode {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.playback-bar-details .playback-mode button {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+}
+
+.playback-bar-details .playback-mode button.active {
+  background: #646cff;
+  color: white;
+  border-color: #646cff;
+}
+
+.playback-bar-details .volume-sliders {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.playback-bar-details .volume-sliders label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.playback-bar-details .volume-sliders input[type="range"] {
+  width: 80px;
+}

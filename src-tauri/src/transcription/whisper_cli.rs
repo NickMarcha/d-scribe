@@ -7,13 +7,19 @@ use std::process::Command;
 pub struct WhisperCliBackend {
     pub model_path: Option<String>,
     pub binary_path: Option<String>,
+    pub language_code: Option<String>,
 }
 
 impl WhisperCliBackend {
-    pub fn new(model_path: Option<String>, binary_path: Option<String>) -> Self {
+    pub fn new(
+        model_path: Option<String>,
+        binary_path: Option<String>,
+        language_code: Option<String>,
+    ) -> Self {
         Self {
             model_path,
             binary_path,
+            language_code,
         }
     }
 
@@ -33,13 +39,18 @@ impl WhisperCliBackend {
             .binary_path
             .as_deref()
             .unwrap_or("main");
+        let mut args: Vec<&str> = vec![
+            "-m",
+            model_path.to_str().unwrap(),
+            "-f",
+            audio_path.to_str().unwrap(),
+        ];
+        if let Some(ref code) = self.language_code {
+            args.push("-l");
+            args.push(code);
+        }
         let output = Command::new(binary)
-            .args([
-                "-m",
-                model_path.to_str().unwrap(),
-                "-f",
-                audio_path.to_str().unwrap(),
-            ])
+            .args(args)
             .output()
             .map_err(|e| format!("Failed to run whisper: {}", e))?;
 

@@ -7,15 +7,21 @@
 }
 
 .stats-panel-collapsed {
-  padding: 0.25rem;
+  padding: 0.2rem 0.4rem;
+  min-width: auto;
+  display: inline-flex;
+}
+
+.stats-panel-collapsed .stats-panel-toggle {
+  margin-bottom: 0;
 }
 
 .stats-panel-toggle {
   background: transparent;
   border: 1px dashed #646cff;
   color: #646cff;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
   cursor: pointer;
   border-radius: 4px;
   margin-bottom: 0.5rem;

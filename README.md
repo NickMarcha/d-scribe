@@ -1,5 +1,7 @@
 # d-scribe
 
+![d-scribe logo](src/assets/d-scribe-logo.svg)
+
 Record Discord voice channel audio and transcribe it with speaker attribution using Whisper.
 
 ## Features

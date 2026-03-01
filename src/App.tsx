@@ -5,12 +5,14 @@ import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 type Tab = "session" | "settings";
+type DiscordState = "InVoice" | "Idle" | "Disconnected";
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>("session");
   const [appDataDir, setAppDataDir] = useState<string>("");
   const [logFilePath, setLogFilePath] = useState<string>("");
-  const [discordConnected, setDiscordConnected] = useState<boolean | null>(null);
+  const [discordState, setDiscordState] = useState<DiscordState | null>(null);
+  const [discordRunning, setDiscordRunning] = useState<boolean>(false);
   const [channelInfo, setChannelInfo] = useState<{
     guild_name?: string;
     channel_name?: string;
@@ -20,10 +22,13 @@ function App() {
   useEffect(() => {
     async function checkConnection() {
       try {
-        const state = await invoke<string>("discord_rpc_connection_state");
-        const connected = state === "Connected";
-        setDiscordConnected(connected);
-        if (connected) {
+        const result = await invoke<{
+          state: DiscordState;
+          discord_running: boolean;
+        }>("discord_rpc_connection_state");
+        setDiscordState(result.state);
+        setDiscordRunning(result.discord_running);
+        if (result.state === "InVoice") {
           const info = await invoke<{
             guild_name?: string;
             channel_name?: string;
@@ -34,7 +39,8 @@ function App() {
           setChannelInfo(null);
         }
       } catch {
-        setDiscordConnected(false);
+        setDiscordState("Disconnected");
+        setDiscordRunning(false);
         setChannelInfo(null);
       }
     }
@@ -56,7 +62,7 @@ function App() {
 
   return (
     <main className="container">
-      <h1>Discord Scribe</h1>
+      <h1>D-Scribe</h1>
       <p className="subtitle">Transcribe Discord voice calls with speaker labels</p>
 
       <nav className="tabs">
@@ -101,13 +107,34 @@ function App() {
       )}
 
       <div
-        className={`discord-status discord-status--${discordConnected === true ? "connected" : "disconnected"} discord-status--expandable`}
-        title={discordConnected === true ? "Discord RPC connected" : "Discord RPC not connected"}
+        className={`discord-status discord-status--${
+          discordState === "InVoice"
+            ? "in-voice"
+            : discordState === "Idle"
+              ? "idle"
+              : "disconnected"
+        } discord-status--expandable`}
+        title={
+          discordState === "InVoice"
+            ? "Discord RPC connected, in voice channel"
+            : discordState === "Idle"
+              ? "Discord RPC connected, not in voice channel"
+              : discordRunning
+                ? "Discord RPC not connected. Connect in Settings."
+                : "Discord is not running. Start Discord to connect."
+        }
       >
         <span className="discord-status-label">
-          Discord: {discordConnected === true ? "Connected" : "Disconnected"}
+          Discord:{" "}
+          {discordState === "InVoice"
+            ? "Connected"
+            : discordState === "Idle"
+              ? "Idle"
+              : discordState === "Disconnected" && !discordRunning
+                ? "Discord not running"
+                : "Disconnected"}
         </span>
-        {discordConnected === true && channelInfo && (
+        {discordState === "InVoice" && channelInfo && (
           <div className="discord-status-details">
             {channelInfo.self_username && (
               <div className="discord-status-row">
