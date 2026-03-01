@@ -39,10 +39,21 @@ jobs:
       - name: install frontend dependencies
         run: npm install
 
+      - name: Create signing key file
+        id: signing-key
+        run: |
+          $keyDir = "$env:USERPROFILE\.tauri"
+          New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+          [System.IO.File]::WriteAllText("$keyDir\myapp.key", $env:TAURI_SIGNING_PRIVATE_KEY)
+          echo "key_path=$keyDir\myapp.key" >> $env:GITHUB_OUTPUT
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
       - uses: tauri-apps/tauri-action@action-v0.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ steps.signing-key.outputs.key_path }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           tagName: app-v__VERSION__
           releaseName: 'd-scribe v__VERSION__'
