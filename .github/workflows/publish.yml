@@ -7,7 +7,7 @@ on:
 
 jobs:
   publish-tauri:
-    if: false  # Disabled for debug - remove this line when done testing
+   # if: false  # Disabled for debug - remove this line when done testing
     permissions:
       contents: write
     strategy:
