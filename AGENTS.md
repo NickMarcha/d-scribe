@@ -39,15 +39,15 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 - **Remote transcription**: Uses `remote_sources` (array of sources with `host`, `transcriptionPath`, `modelsPath`, `apiKey`). Each source can have optional path overrides; transcription URL = `host + (transcriptionPath || "/v1/audio/transcriptions")`. Compatible with open-asr-server, vLLM (Voxtral), LocalAI, and OpenAI.
 - **Model registry**: `model_registry` lists integrated (Whisper) and remote (API) models. Remote models use `sourceId:modelName` as id; `list_remote_models_command` fetches models from a source via `GET /v1/models` (optional override).
 - **Discord RPC voice**: Works with server voice channels, group DM calls, and 1:1 DM calls. Connect in Settings; joining a voice channel before or after connecting both work (the selected channel is polled). Only one connection is active: a new connect aborts the previous one. Auto-reconnect saves the rotated refresh token before connecting.
-- **Discord setup**: Only a Client ID is needed. The Discord app must have "Public Client" on and `https://localhost` under OAuth2 Redirects (`OAUTH_REDIRECT_URI`). Auth is OAuth2 PKCE (no client secret). Transport is IPC named pipes only (no WebSocket, no RPC Origin).
-- **Discord scopes**: `OAUTH_SCOPES` in `src-tauri/src/discord_rpc/client.rs` (`identify`, `rpc.voice.read`, `guilds`). Channel changes are detected by polling `GET_SELECTED_VOICE_CHANNEL` every 2 s (no `VOICE_CHANNEL_SELECT`, which needs full `rpc`). Guild names come from REST `GET /users/@me/guilds`. To go back to full RPC, set the scopes to `["rpc", "identify"]`.
+- **Discord setup**: The Client ID field is optional; empty means `SHARED_CLIENT_ID` in `Settings.tsx` (the maintainer's app, testers only; `ACCESS_REQUEST_URL` links to the access request form). Users can paste their own Client ID instead. The Discord app must have "Public Client" on and `https://localhost` under OAuth2 Redirects (`OAUTH_REDIRECT_URI`). Auth is OAuth2 PKCE (no client secret). Transport is IPC named pipes only (no WebSocket, no RPC Origin).
+- **Discord scopes**: `OAUTH_SCOPES` in `src-tauri/src/discord_rpc/client.rs` (`rpc`, `identify`). The narrower `identify`, `rpc.voice.read`, `guilds` was tried and Discord rejects it with an empty OAuth2 error after approval. Channel changes are detected by polling `GET_SELECTED_VOICE_CHANNEL` every 2 s. Guild names come from RPC `GET_GUILD`.
 - **Paths**: App data under `%APPDATA%/d-scribe/` (projects, projects/recent, models, transcribe_temp). Whisper binary: next to main exe (`whisper-cli.exe` or `whisper-cli-x86_64-pc-windows-msvc.exe`).
 - **Session IDs**: Use `format_project_name` with template `{guild}_{channel}_{timestamp}` (placeholders: `{guild}`, `{channel}`, `{timestamp}`, `{date}`, `{time}`).
 - **Playback**: Default "both" (remote + local mixed); persisted in settings. Volume sliders apply in real time.
 
 ## Settings
 
-Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, recent retention), **Discord** (Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
+Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, recent retention), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
 
 ## Gotchas
 

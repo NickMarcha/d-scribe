@@ -2,8 +2,7 @@
 //!
 //! Auth uses the OAuth2 public client flow with PKCE, so the user only needs a Client ID
 //! (no Client Secret, no RPC Origin). Channel changes are detected by polling
-//! GET_SELECTED_VOICE_CHANNEL, which works with `rpc.voice.read` (the VOICE_CHANNEL_SELECT
-//! event would need the full `rpc` scope).
+//! GET_SELECTED_VOICE_CHANNEL.
 //!
 //! Only one connection is active at a time: starting a new one aborts the previous one, and
 //! only the current connection (by generation) may write the global channel/connected state.
@@ -18,12 +17,12 @@ use tokio::sync::mpsc;
 /// OAuth2 scopes requested in AUTHORIZE.
 ///
 /// - `identify`: user id from AUTHENTICATE
-/// - `rpc.voice.read`: GET_SELECTED_VOICE_CHANNEL and SPEAKING_START/SPEAKING_STOP
-/// - `guilds`: guild names via the REST endpoint `GET /users/@me/guilds`
+/// - `rpc`: GET_SELECTED_VOICE_CHANNEL, SPEAKING_START/SPEAKING_STOP and GET_GUILD
 ///
-/// If Discord rejects these, switch back to full RPC with `&["rpc", "identify"]`.
-/// Guild names then come from the RPC GET_GUILD command instead (see `has_scope("guilds")`).
-pub const OAUTH_SCOPES: &[&str] = &["identify", "rpc.voice.read", "guilds"];
+/// The narrower `["identify", "rpc.voice.read", "guilds"]` fails: Discord returns an empty
+/// OAuth2 error after the user approves. With `guilds`, guild names come from the REST
+/// endpoint `GET /users/@me/guilds` instead of GET_GUILD (see `has_scope("guilds")`).
+pub const OAUTH_SCOPES: &[&str] = &["rpc", "identify"];
 
 /// Sent as `redirect_uri` in the code exchange. Must be listed under OAuth2 Redirects
 /// in the Discord app.

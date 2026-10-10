@@ -53,20 +53,24 @@ npm run tauri dev
 
 Open Settings, expand **Manage models** and download a model such as `base.en`. Models go in `%APPDATA%/d-scribe/models/`. Under **Selected models**, pick which model each language uses for live and regular transcription.
 
-### 5. Set up a Discord application
+### 5. Get access to Discord
 
-d-scribe needs a Discord application of your own, but only its client ID.
+d-scribe reads who is speaking from your Discord client. Discord only allows this for accounts on an app's tester list, so pick one of these:
 
-1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
-2. On the **OAuth2** page, turn on **Public Client**.
-3. On the same page, add `https://localhost` under **Redirects**.
-4. Copy the **Client ID**.
+- **Use the d-scribe app.** Ask to be added as a tester (Settings > **Discord** has a **Request access** link). Once you're added, accept the invite from Discord and leave the Client ID field empty.
+- **Use your own Discord app.** No need to ask anyone:
+  1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
+  2. On the **OAuth2** page, turn on **Public Client**.
+  3. On the same page, add `https://localhost` under **Redirects**.
+  4. Copy the **Client ID** and paste it in Settings > **Discord**.
 
-d-scribe asks Discord for the `identify`, `rpc.voice.read` and `guilds` scopes. Discord may only grant these to the app owner and accounts listed under **App Testers**. If Connect fails with a message about permissions, add your Discord account as an App Tester.
+  You own the app, so you can connect right away. To let friends use your app too, add them under **App Testers** (up to 50).
+
+d-scribe asks Discord for the `rpc` and `identify` scopes.
 
 ### 6. Connect and record
 
-1. In Settings, expand **Discord**, paste the client ID and click **Connect to Discord**. Approve the popup in Discord. The login is saved, so you usually only do this once.
+1. In Settings, expand **Discord** and click **Connect to Discord**. Approve the popup in Discord. The login is saved, so you usually only do this once.
 2. Join a voice channel. You can do this before or after connecting.
 3. Click **Start recording**, or **Start live recording** to see text appear during the call.
 4. Click **Stop recording** when you're done. The session is saved to the recent folder.

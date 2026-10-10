@@ -8,6 +8,11 @@ import "./Settings.css";
 
 const STORE_PATH = "settings.json";
 
+/** The d-scribe Discord app. Used when the Client ID field is empty. Only its App Testers can connect. */
+const SHARED_CLIENT_ID = "1477100857064689897";
+/** Form for asking to be added as an App Tester of the shared app. Hidden while empty. */
+const ACCESS_REQUEST_URL = "";
+
 const WHISPER_MODELS = [
   "tiny.en", "base.en", "small.en", "medium.en",
   "tiny", "base", "small", "medium", "large-v3", "large-v3-turbo",
@@ -356,7 +361,7 @@ export function Settings() {
   async function connectDiscord() {
     setStatus("Connecting...");
     try {
-      await invoke("discord_rpc_connect", { clientId });
+      await invoke("discord_rpc_connect", { clientId: clientId.trim() || SHARED_CLIENT_ID });
       setStatus("Connected. Join a voice channel to start recording.");
     } catch (e) {
       setStatus(`Connection failed: ${e}`);
@@ -445,14 +450,23 @@ export function Settings() {
           {discordExpanded && (
             <div className="collapsible-content">
               <p className="settings-hint">
-                Each user needs their own Discord application. d-scribe only needs its client ID.
+                By default d-scribe uses its own Discord app. Discord only lets accounts on that
+                app&apos;s tester list connect, so you need to ask for access first.
+                {ACCESS_REQUEST_URL && (
+                  <>
+                    {" "}
+                    <button type="button" className="link-button" onClick={() => openUrl(ACCESS_REQUEST_URL)}>
+                      Request access
+                    </button>
+                  </>
+                )}
               </p>
               <button
                 type="button"
                 className="instructions-toggle"
                 onClick={() => setShowInstructions(!showInstructions)}
               >
-                {showInstructions ? "Hide" : "Show"} how to get a client ID
+                {showInstructions ? "Hide" : "Show"} how to use your own Discord app instead
               </button>
               {showInstructions && (
                 <div className="instructions">
@@ -480,13 +494,13 @@ export function Settings() {
                 </div>
               )}
               <div className="form-group">
-                <label htmlFor="client-id">Client ID</label>
+                <label htmlFor="client-id">Client ID (optional)</label>
                 <input
                   id="client-id"
                   type="text"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
-                  placeholder="Client ID of your Discord app"
+                  placeholder="Leave empty to use the d-scribe app"
                 />
               </div>
               <div className="button-row">

@@ -1090,8 +1090,10 @@ pub fn run() {
             paths::ensure_directories(app.handle())?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(true) = discord_rpc_auto_reconnect(handle).await {
-                    log::info!("[d-scribe] Auto-reconnected to Discord");
+                match discord_rpc_auto_reconnect(handle).await {
+                    Ok(true) => log::info!("[d-scribe] Auto-reconnected to Discord"),
+                    Ok(false) => log::info!("[d-scribe] No saved Discord login"),
+                    Err(e) => log::warn!("[d-scribe] Discord auto-reconnect failed: {}", e),
                 }
             });
             // Set window icon explicitly (helps in dev mode when PE icon may not show)
