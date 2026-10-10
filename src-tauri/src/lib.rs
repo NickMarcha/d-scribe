@@ -49,13 +49,31 @@ fn get_models_dir(app: tauri::AppHandle) -> Result<String, String> {
     models_dir(&app).map(|p| p.to_string_lossy().into_owned())
 }
 
+/// Forward speaking events from the Discord connection to the recorder. Ends when the
+/// connection is dropped (its sender goes away).
+fn spawn_speaking_forwarder(mut rx: mpsc::UnboundedReceiver<discord_rpc::SpeakingEvent>) {
+    tokio::spawn(async move {
+        while let Some(evt) = rx.recv().await {
+            match evt {
+                discord_rpc::SpeakingEvent::Start { user_id } => {
+                    record_speaking_event(true, user_id);
+                }
+                discord_rpc::SpeakingEvent::Stop { user_id } => {
+                    record_speaking_event(false, user_id);
+                }
+            }
+        }
+    });
+}
+
 #[tauri::command]
 async fn discord_rpc_connect(
     app: tauri::AppHandle,
     client_id: String,
 ) -> Result<(), String> {
     let client = DiscordRpcClient::new(client_id.clone());
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, rx) = mpsc::unbounded_channel();
+    spawn_speaking_forwarder(rx);
     let refresh_token = client.connect(tx).await?;
     if let Some(refresh) = refresh_token {
         let path = discord_tokens_path(&app)?;
@@ -67,18 +85,6 @@ async fn discord_rpc_connect(
             },
         )?;
     }
-    tokio::spawn(async move {
-        while let Some(evt) = rx.recv().await {
-            match evt {
-                discord_rpc::SpeakingEvent::Start { user_id } => {
-                    record_speaking_event(true, user_id);
-                }
-                discord_rpc::SpeakingEvent::Stop { user_id } => {
-                    record_speaking_event(false, user_id);
-                }
-            }
-        }
-    });
     Ok(())
 }
 
@@ -90,49 +96,41 @@ async fn discord_rpc_auto_reconnect(app: tauri::AppHandle) -> Result<bool, Strin
         None => return Ok(false),
     };
     let client = DiscordRpcClient::new(tokens.client_id.clone());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let new_refresh = client
-        .connect_with_refresh_token(tx, tokens.refresh_token)
-        .await?;
-    if let Some(refresh) = new_refresh {
-        save_tokens(
-            &path,
-            &discord_rpc::DiscordTokens {
-                client_id: tokens.client_id,
-                refresh_token: refresh,
-            },
-        )?;
-    }
-    tokio::spawn(async move {
-        while let Some(evt) = rx.recv().await {
-            match evt {
-                discord_rpc::SpeakingEvent::Start { user_id } => {
-                    record_speaking_event(true, user_id);
-                }
-                discord_rpc::SpeakingEvent::Stop { user_id } => {
-                    record_speaking_event(false, user_id);
-                }
-            }
-        }
-    });
+    // Discord rotates refresh tokens: save the new one before anything else can fail.
+    let (access_token, refresh) = client.refresh_tokens(&tokens.refresh_token).await?;
+    save_tokens(
+        &path,
+        &discord_rpc::DiscordTokens {
+            client_id: tokens.client_id,
+            refresh_token: refresh,
+        },
+    )?;
+    let (tx, rx) = mpsc::unbounded_channel();
+    spawn_speaking_forwarder(rx);
+    client.connect_with_access_token(tx, access_token).await?;
     Ok(true)
 }
 
+/// Discord desktop is running if one of its IPC pipes (discord-ipc-0..9) exists.
+/// Lists the pipe namespace instead of opening pipes, so no connection is made.
 async fn is_discord_running() -> bool {
-    for port in 6463..6473 {
-        let addr = (std::net::IpAddr::from([127, 0, 0, 1]), port);
-        if tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            tokio::net::TcpStream::connect(addr),
-        )
-        .await
-        .map(|r| r.is_ok())
-        .unwrap_or(false)
-        {
-            return true;
-        }
+    #[cfg(windows)]
+    {
+        std::fs::read_dir(r"\\.\pipe\")
+            .map(|entries| {
+                entries.flatten().any(|e| {
+                    e.file_name()
+                        .to_str()
+                        .and_then(|n| n.strip_prefix("discord-ipc-"))
+                        .is_some_and(|n| n.len() == 1 && n.as_bytes()[0].is_ascii_digit())
+                })
+            })
+            .unwrap_or(false)
     }
-    false
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 #[tauri::command]

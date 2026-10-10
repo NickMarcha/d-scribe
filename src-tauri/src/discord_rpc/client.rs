@@ -4,6 +4,9 @@
 //! (no Client Secret, no RPC Origin). Channel changes are detected by polling
 //! GET_SELECTED_VOICE_CHANNEL, which works with `rpc.voice.read` (the VOICE_CHANNEL_SELECT
 //! event would need the full `rpc` scope).
+//!
+//! Only one connection is active at a time: starting a new one aborts the previous one, and
+//! only the current connection (by generation) may write the global channel/connected state.
 
 use crate::discord_rpc::events::SpeakingEvent;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -30,6 +33,18 @@ const TOKEN_URL: &str = "https://discord.com/api/oauth2/token";
 
 fn has_scope(scope: &str) -> bool {
     OAUTH_SCOPES.contains(&scope)
+}
+
+/// User-facing message for when Discord refuses the requested scopes.
+fn scope_rejected_message(detail: &str) -> String {
+    format!(
+        "This Discord app is not allowed to use the permissions d-scribe asks for ({}). \
+         Only the app owner and App Testers can use them. In the Discord Developer Portal, \
+         add your Discord account as an App Tester for this app, or ask the app owner to add you. \
+         Discord said: {}",
+        OAUTH_SCOPES.join(", "),
+        detail
+    )
 }
 
 struct TokenSet {
@@ -64,6 +79,9 @@ async fn post_token(form: &[(&str, &str)]) -> Result<TokenSet, String> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        if body.contains("invalid_scope") {
+            return Err(scope_rejected_message(&body));
+        }
         let mut msg = format!("Discord token request failed ({}): {}", status, body);
         if body.contains("invalid_client") {
             msg.push_str(". Turn on Public Client in the OAuth2 page of your Discord app.");
@@ -93,6 +111,7 @@ async fn post_token(form: &[(&str, &str)]) -> Result<TokenSet, String> {
 }
 
 /// Exchange an RPC authorization code for tokens (public client: no secret, PKCE verifier).
+#[cfg_attr(not(windows), allow(dead_code))]
 async fn exchange_code(client_id: &str, code: &str, code_verifier: &str) -> Result<TokenSet, String> {
     post_token(&[
         ("grant_type", "authorization_code"),
@@ -100,16 +119,6 @@ async fn exchange_code(client_id: &str, code: &str, code_verifier: &str) -> Resu
         ("client_id", client_id),
         ("code_verifier", code_verifier),
         ("redirect_uri", OAUTH_REDIRECT_URI),
-    ])
-    .await
-}
-
-/// Exchange a refresh token for a new access token (public client: no secret).
-async fn refresh_access_token(client_id: &str, refresh_token: &str) -> Result<TokenSet, String> {
-    post_token(&[
-        ("grant_type", "refresh_token"),
-        ("refresh_token", refresh_token),
-        ("client_id", client_id),
     ])
     .await
 }
@@ -123,6 +132,22 @@ impl DiscordRpcClient {
         Self { client_id }
     }
 
+    /// Exchange a refresh token for a new access token (public client: no secret).
+    /// Returns (access_token, refresh_token_to_save). Discord rotates refresh tokens, so the
+    /// caller must persist the returned one right away.
+    pub async fn refresh_tokens(&self, refresh_token: &str) -> Result<(String, String), String> {
+        let tokens = post_token(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", self.client_id.as_str()),
+        ])
+        .await?;
+        let refresh = tokens
+            .refresh_token
+            .unwrap_or_else(|| refresh_token.to_string());
+        Ok((tokens.access_token, refresh))
+    }
+
     /// Connect and authorize (Discord shows an approval popup).
     /// Returns the refresh token to persist.
     pub async fn connect(
@@ -132,16 +157,13 @@ impl DiscordRpcClient {
         self.start(tx, None).await
     }
 
-    /// Connect using a stored refresh token (no popup). Returns the refresh token to persist.
-    pub async fn connect_with_refresh_token(
+    /// Connect with an access token from `refresh_tokens` (no popup).
+    pub async fn connect_with_access_token(
         &self,
         tx: mpsc::UnboundedSender<SpeakingEvent>,
-        refresh_token: String,
-    ) -> Result<Option<String>, String> {
-        let tokens = refresh_access_token(&self.client_id, &refresh_token).await?;
-        let refresh_to_save = tokens.refresh_token.unwrap_or(refresh_token);
-        self.start(tx, Some(tokens.access_token)).await?;
-        Ok(Some(refresh_to_save))
+        access_token: String,
+    ) -> Result<(), String> {
+        self.start(tx, Some(access_token)).await.map(|_| ())
     }
 
     #[cfg(windows)]
@@ -150,18 +172,21 @@ impl DiscordRpcClient {
         tx: mpsc::UnboundedSender<SpeakingEvent>,
         access_token: Option<String>,
     ) -> Result<Option<String>, String> {
+        let generation = connection::begin_generation();
         let (reader, writer) = crate::discord_rpc::ipc::connect_ipc(&self.client_id).await?;
         let conn = connection::Conn::new(reader, writer, tx);
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(connection::run(
+        let handle = tokio::spawn(connection::run(
             conn,
+            generation,
             self.client_id.clone(),
             access_token,
             ready_tx,
         ));
+        connection::register_task(generation, handle.abort_handle());
         ready_rx
             .await
-            .map_err(|_| "Discord connection task stopped".to_string())?
+            .map_err(|_| "Discord connection was stopped".to_string())?
     }
 
     #[cfg(not(windows))]
@@ -183,14 +208,53 @@ mod connection {
     use log::{debug, error, info, warn};
     use serde_json::{json, Value};
     use std::collections::HashMap;
-    use std::time::Duration;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    use tokio::task::AbortHandle;
     use tokio::time::MissedTickBehavior;
     use uuid::Uuid;
 
     const CHANNEL_POLL_INTERVAL: Duration = Duration::from_secs(2);
+    const GUILD_RETRY_DELAY: Duration = Duration::from_secs(30);
     const SPEAKING_EVENTS: [&str; 2] = ["SPEAKING_START", "SPEAKING_STOP"];
     const RPC_ERROR_OAUTH2: i64 = 5000;
     const USER_GUILDS_URL: &str = "https://discord.com/api/v10/users/@me/guilds";
+
+    // ---- Single active connection ----
+
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    static ACTIVE_TASK: Mutex<Option<AbortHandle>> = Mutex::new(None);
+
+    fn is_current(generation: u64) -> bool {
+        GENERATION.load(Ordering::SeqCst) == generation
+    }
+
+    /// Stop the previous connection, reset global state and return the new generation.
+    pub(super) fn begin_generation() -> u64 {
+        let mut active = ACTIVE_TASK.lock().unwrap();
+        let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(old) = active.take() {
+            old.abort();
+        }
+        set_rpc_connected(false);
+        clear_channel_info();
+        generation
+    }
+
+    /// Track the task for `generation`, or abort it if a newer connection already started.
+    pub(super) fn register_task(generation: u64, handle: AbortHandle) {
+        let mut active = ACTIVE_TASK.lock().unwrap();
+        if is_current(generation) {
+            if let Some(old) = active.replace(handle) {
+                old.abort();
+            }
+        } else {
+            handle.abort();
+        }
+    }
+
+    // ---- Protocol helpers ----
 
     type Frame = Result<(u32, String), String>;
 
@@ -198,59 +262,55 @@ mod connection {
         v.get(key).and_then(|v| v.as_str())
     }
 
-    struct RpcError {
-        code: Option<i64>,
-        message: String,
+    enum RpcError {
+        /// Discord answered the command with an ERROR event.
+        Command { code: Option<i64>, message: String },
+        /// The pipe failed or closed. The connection is gone.
+        Transport(String),
     }
 
     impl RpcError {
         fn from_data(data: &Value) -> Self {
-            Self {
+            RpcError::Command {
                 code: data.get("code").and_then(|v| v.as_i64()),
                 message: str_field(data, "message")
                     .unwrap_or("Unknown error")
                     .to_string(),
             }
         }
-
-        fn other(message: String) -> Self {
-            Self {
-                code: None,
-                message,
-            }
-        }
     }
 
     impl From<RpcError> for String {
         fn from(e: RpcError) -> String {
-            match e.code {
-                Some(code) => format!("{} (code {})", e.message, code),
-                None => e.message,
+            match e {
+                RpcError::Command {
+                    code: Some(code),
+                    message,
+                } => format!("{} (code {})", message, code),
+                RpcError::Command { code: None, message } => message,
+                RpcError::Transport(message) => message,
             }
         }
     }
 
     /// Map an AUTHORIZE error to a user-facing message.
     fn authorize_error(err: RpcError) -> String {
-        let lower = err.message.to_lowercase();
+        let (code, message) = match err {
+            RpcError::Command { code, message } => (code, message),
+            RpcError::Transport(message) => return message,
+        };
+        let lower = message.to_lowercase();
         let denied = lower.contains("denied") || lower.contains("cancel");
         let scope_rejected = lower.contains("invalid_scope")
             || lower.contains("scope")
-            || (err.code == Some(RPC_ERROR_OAUTH2) && !denied);
+            || (code == Some(RPC_ERROR_OAUTH2) && !denied);
         if scope_rejected {
-            format!(
-                "This Discord app is not allowed to use the permissions d-scribe asks for ({}). \
-                 Only the app owner and App Testers can use them. In the Discord Developer Portal, \
-                 add your Discord account as an App Tester for this app, or ask the app owner to add you. \
-                 Discord said: {}",
-                OAUTH_SCOPES.join(", "),
-                err.message
-            )
+            scope_rejected_message(&message)
         } else if denied {
             "Authorization was cancelled. Click Connect and approve the request in the Discord popup."
                 .to_string()
         } else {
-            format!("Discord authorization failed: {}", String::from(err))
+            format!("Discord authorization failed: {}", message)
         }
     }
 
@@ -263,7 +323,8 @@ mod connection {
     }
 
     /// One IPC connection. A reader task forwards frames into a channel so the main loop can
-    /// wait on frames and the poll timer at the same time (pipe reads are not cancel-safe).
+    /// wait on frames, the poll timer and background lookups at the same time (pipe reads are
+    /// not cancel-safe).
     pub(super) struct Conn {
         writer: IpcWriter,
         frames: mpsc::UnboundedReceiver<Frame>,
@@ -357,9 +418,9 @@ mod connection {
             self.writer
                 .send_json(&payload.to_string())
                 .await
-                .map_err(RpcError::other)?;
+                .map_err(RpcError::Transport)?;
             loop {
-                let p = self.next_payload().await.map_err(RpcError::other)?;
+                let p = self.next_payload().await.map_err(RpcError::Transport)?;
                 if str_field(&p, "nonce") == Some(nonce.as_str()) {
                     let data = p.get("data").cloned().unwrap_or(Value::Null);
                     if str_field(&p, "evt") == Some("ERROR") {
@@ -367,7 +428,7 @@ mod connection {
                     }
                     return Ok(data);
                 }
-                self.dispatch_event(&p).map_err(RpcError::other)?;
+                self.dispatch_event(&p).map_err(RpcError::Transport)?;
             }
         }
 
@@ -421,11 +482,17 @@ mod connection {
             &mut self,
             cmd: &str,
             channel_id: &str,
-        ) -> Result<(), String> {
+        ) -> Result<(), RpcError> {
             for evt in SPEAKING_EVENTS {
                 self.request(cmd, json!({ "channel_id": channel_id }), Some(evt))
                     .await
-                    .map_err(|e| format!("{} {} failed: {}", cmd, evt, String::from(e)))?;
+                    .map_err(|e| match e {
+                        RpcError::Command { code, message } => RpcError::Command {
+                            code,
+                            message: format!("{} {} failed: {}", cmd, evt, message),
+                        },
+                        transport => transport,
+                    })?;
             }
             Ok(())
         }
@@ -471,101 +538,185 @@ mod connection {
         labels
     }
 
+    type GuildFetchResult = Result<HashMap<String, String>, String>;
+
     /// Tracks the selected voice channel and keeps speaking subscriptions and ChannelInfo in sync.
     struct ChannelTracker {
+        generation: u64,
         self_user_id: Option<String>,
         access_token: String,
-        current_channel_id: Option<String>,
-        /// Guild id -> name from `GET /users/@me/guilds` (only with the `guilds` scope).
+        /// Last GET_SELECTED_VOICE_CHANNEL response, if in a channel.
+        current_channel: Option<Value>,
+        /// Channel we hold SPEAKING subscriptions for. None means (re)subscribe on next apply.
+        subscribed_channel_id: Option<String>,
+        /// Guild id -> name. Only successful lookups are stored.
         guild_names: HashMap<String, String>,
-        /// Last resolved guild, so polling does not repeat lookups.
-        last_guild: Option<(String, Option<String>)>,
+        guild_fetch_in_flight: bool,
+        guild_retry_after: Option<Instant>,
+        guild_tx: mpsc::UnboundedSender<GuildFetchResult>,
+        guild_rx: mpsc::UnboundedReceiver<GuildFetchResult>,
     }
 
     impl ChannelTracker {
-        async fn guild_name(&mut self, conn: &mut Conn, guild_id: &str) -> Option<String> {
-            if let Some((id, name)) = &self.last_guild {
-                if id == guild_id {
-                    return name.clone();
-                }
+        fn new(generation: u64, self_user_id: Option<String>, access_token: String) -> Self {
+            let (guild_tx, guild_rx) = mpsc::unbounded_channel();
+            Self {
+                generation,
+                self_user_id,
+                access_token,
+                current_channel: None,
+                subscribed_channel_id: None,
+                guild_names: HashMap::new(),
+                guild_fetch_in_flight: false,
+                guild_retry_after: None,
+                guild_tx,
+                guild_rx,
             }
-            let name = if has_scope("guilds") {
-                if !self.guild_names.contains_key(guild_id) {
-                    match fetch_user_guilds(&self.access_token).await {
-                        Ok(map) => self.guild_names = map,
-                        Err(e) => warn!("[discord-rpc] Could not load guild names: {}", e),
-                    }
-                }
-                self.guild_names.get(guild_id).cloned()
-            } else {
-                conn.request("GET_GUILD", json!({ "guild_id": guild_id }), None)
-                    .await
-                    .ok()
-                    .and_then(|d| str_field(&d, "name").map(String::from))
-            };
-            self.last_guild = Some((guild_id.to_string(), name.clone()));
-            name
         }
 
-        /// Apply a GET_SELECTED_VOICE_CHANNEL response (channel object or null).
-        async fn apply(&mut self, conn: &mut Conn, channel: &Value) -> Result<(), String> {
-            let new_id = str_field(channel, "id").map(String::from);
-            let old_id = self.current_channel_id.clone();
+        fn current_channel_id(&self) -> Option<&str> {
+            self.current_channel.as_ref().and_then(|c| str_field(c, "id"))
+        }
 
-            let Some(new_id) = new_id else {
-                if let Some(old) = old_id {
-                    if let Err(e) = conn.set_speaking_subscription("UNSUBSCRIBE", &old).await {
-                        warn!("[discord-rpc] {}", e);
-                    }
-                    clear_channel_info();
-                    self.current_channel_id = None;
-                    info!("[discord-rpc] User left voice channel");
-                }
-                return Ok(());
-            };
+        fn current_guild_id(&self) -> Option<&str> {
+            self.current_channel
+                .as_ref()
+                .and_then(|c| str_field(c, "guild_id"))
+        }
 
-            let changed = old_id.as_deref() != Some(new_id.as_str());
-            if changed {
-                if let Some(old) = &old_id {
-                    if let Err(e) = conn.set_speaking_subscription("UNSUBSCRIBE", old).await {
-                        warn!("[discord-rpc] {}", e);
-                    }
-                }
-                conn.set_speaking_subscription("SUBSCRIBE", &new_id).await?;
-                self.current_channel_id = Some(new_id.clone());
+        /// Write ChannelInfo for the current channel (only if this is the active connection).
+        fn publish(&self) {
+            if !is_current(self.generation) {
+                return;
             }
-
+            let Some(channel) = &self.current_channel else {
+                clear_channel_info();
+                return;
+            };
+            let Some(channel_id) = str_field(channel, "id") else {
+                return;
+            };
             let guild_id = str_field(channel, "guild_id").map(String::from);
-            let guild_name = match &guild_id {
-                Some(gid) => self.guild_name(conn, gid).await,
-                None => None,
-            };
-            let channel_name = str_field(channel, "name").map(String::from);
-            if changed {
-                info!(
-                    "[discord-rpc] Voice channel: {} / {} ({})",
-                    guild_name.as_deref().unwrap_or("?"),
-                    channel_name.as_deref().unwrap_or("?"),
-                    new_id
-                );
-            }
+            let guild_name = guild_id
+                .as_ref()
+                .and_then(|gid| self.guild_names.get(gid).cloned());
             set_channel_info(ChannelInfo {
-                channel_id: new_id,
-                channel_name,
+                channel_id: channel_id.to_string(),
+                channel_name: str_field(channel, "name").map(String::from),
                 channel_type: channel.get("type").and_then(|v| v.as_u64()).map(|n| n as u8),
                 guild_id,
                 guild_name,
                 self_user_id: self.self_user_id.clone(),
                 user_labels: user_labels(channel, self.self_user_id.as_deref()),
             });
+        }
+
+        /// Make sure the guild name is known or being looked up. The REST lookup runs in the
+        /// background so speaking events are not held up; its result arrives on `guild_rx`.
+        async fn ensure_guild_name(&mut self, conn: &mut Conn, guild_id: &str) -> Result<(), RpcError> {
+            if self.guild_names.contains_key(guild_id) || self.guild_fetch_in_flight {
+                return Ok(());
+            }
+            if let Some(after) = self.guild_retry_after {
+                if Instant::now() < after {
+                    return Ok(());
+                }
+            }
+            if has_scope("guilds") {
+                self.guild_fetch_in_flight = true;
+                let token = self.access_token.clone();
+                let tx = self.guild_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx.send(fetch_user_guilds(&token).await);
+                });
+            } else {
+                // Full `rpc` scope: GET_GUILD. request() keeps dispatching speaking events.
+                match conn
+                    .request("GET_GUILD", json!({ "guild_id": guild_id }), None)
+                    .await
+                {
+                    Ok(d) => match str_field(&d, "name") {
+                        Some(name) => {
+                            self.guild_names.insert(guild_id.to_string(), name.to_string());
+                        }
+                        None => self.guild_retry_after = Some(Instant::now() + GUILD_RETRY_DELAY),
+                    },
+                    Err(RpcError::Transport(e)) => return Err(RpcError::Transport(e)),
+                    Err(e) => {
+                        warn!("[discord-rpc] GET_GUILD failed: {}", String::from(e));
+                        self.guild_retry_after = Some(Instant::now() + GUILD_RETRY_DELAY);
+                    }
+                }
+            }
             Ok(())
         }
 
-        async fn poll_selected_channel(&mut self, conn: &mut Conn) -> Result<(), String> {
+        fn on_guilds_fetched(&mut self, result: GuildFetchResult) {
+            self.guild_fetch_in_flight = false;
+            match result {
+                Ok(map) => {
+                    self.guild_names = map;
+                    let missing = self
+                        .current_guild_id()
+                        .is_some_and(|gid| !self.guild_names.contains_key(gid));
+                    self.guild_retry_after =
+                        missing.then(|| Instant::now() + GUILD_RETRY_DELAY);
+                    self.publish();
+                }
+                Err(e) => {
+                    warn!("[discord-rpc] Could not load guild names: {}", e);
+                    self.guild_retry_after = Some(Instant::now() + GUILD_RETRY_DELAY);
+                }
+            }
+        }
+
+        /// Apply a GET_SELECTED_VOICE_CHANNEL response (channel object or null).
+        /// Command errors (e.g. a failed SUBSCRIBE) are returned after state is updated, so
+        /// the next poll retries them.
+        async fn apply(&mut self, conn: &mut Conn, channel: &Value) -> Result<(), RpcError> {
+            let new_id = str_field(channel, "id").map(String::from);
+
+            if self.subscribed_channel_id.is_some() && self.subscribed_channel_id != new_id {
+                let old = self.subscribed_channel_id.take().unwrap_or_default();
+                match conn.set_speaking_subscription("UNSUBSCRIBE", &old).await {
+                    Err(RpcError::Transport(e)) => return Err(RpcError::Transport(e)),
+                    Err(e) => warn!("[discord-rpc] {}", String::from(e)),
+                    Ok(()) => {}
+                }
+            }
+
+            let Some(new_id) = new_id else {
+                if self.current_channel.take().is_some() {
+                    info!("[discord-rpc] User left voice channel");
+                    self.publish();
+                }
+                return Ok(());
+            };
+
+            if self.current_channel_id() != Some(new_id.as_str()) {
+                info!(
+                    "[discord-rpc] Voice channel: {} ({})",
+                    str_field(channel, "name").unwrap_or("?"),
+                    new_id
+                );
+            }
+            self.current_channel = Some(channel.clone());
+            if let Some(gid) = str_field(channel, "guild_id") {
+                self.ensure_guild_name(conn, gid).await?;
+            }
+            self.publish();
+
+            if self.subscribed_channel_id.is_none() {
+                conn.set_speaking_subscription("SUBSCRIBE", &new_id).await?;
+                self.subscribed_channel_id = Some(new_id);
+            }
+            Ok(())
+        }
+
+        async fn poll_selected_channel(&mut self, conn: &mut Conn) -> Result<(), RpcError> {
             let channel = conn
                 .request("GET_SELECTED_VOICE_CHANNEL", json!({}), None)
-                .await
-                .map_err(|e| format!("GET_SELECTED_VOICE_CHANNEL failed: {}", String::from(e)))?;
+                .await?;
             self.apply(conn, &channel).await
         }
 
@@ -581,8 +732,18 @@ mod connection {
                             conn.dispatch_event(&p)?;
                         }
                     }
+                    Some(result) = self.guild_rx.recv() => {
+                        self.on_guilds_fetched(result);
+                    }
                     _ = interval.tick() => {
-                        self.poll_selected_channel(conn).await?;
+                        match self.poll_selected_channel(conn).await {
+                            Ok(()) => {}
+                            Err(RpcError::Transport(e)) => return Err(e),
+                            Err(e) => warn!(
+                                "[discord-rpc] Channel poll failed, retrying: {}",
+                                String::from(e)
+                            ),
+                        }
                     }
                 }
             }
@@ -613,10 +774,11 @@ mod connection {
         exchange_code(client_id, code, &pkce.verifier).await
     }
 
-    /// READY, authorize (unless an access token is given), AUTHENTICATE, read the selected
-    /// voice channel and subscribe to speaking events.
+    /// READY, authorize (unless an access token is given), AUTHENTICATE, then read the
+    /// selected voice channel. Not being in a voice channel is fine: polling picks it up.
     async fn setup(
         conn: &mut Conn,
+        generation: u64,
         client_id: &str,
         access_token: Option<String>,
     ) -> Result<(ChannelTracker, Option<String>), String> {
@@ -644,39 +806,27 @@ mod connection {
             .and_then(|u| str_field(u, "id"))
             .map(String::from);
 
-        info!("[discord-rpc] Getting voice channel...");
-        let channel = conn
-            .request("GET_SELECTED_VOICE_CHANNEL", json!({}), None)
+        let mut tracker = ChannelTracker::new(generation, self_user_id, access_token);
+        tracker
+            .poll_selected_channel(conn)
             .await
             .map_err(|e| format!("Could not read the voice channel: {}", String::from(e)))?;
-        if str_field(&channel, "id").is_none() {
-            return Err(
-                "Not in a voice channel. Join a voice channel in Discord first, then click Connect."
-                    .into(),
-            );
-        }
-
-        let mut tracker = ChannelTracker {
-            self_user_id,
-            access_token,
-            current_channel_id: None,
-            guild_names: HashMap::new(),
-            last_guild: None,
-        };
-        tracker.apply(conn, &channel).await?;
         Ok((tracker, refresh_token))
     }
 
     pub(super) async fn run(
         mut conn: Conn,
+        generation: u64,
         client_id: String,
         access_token: Option<String>,
         ready_tx: tokio::sync::oneshot::Sender<Result<Option<String>, String>>,
     ) {
-        let mut tracker = match setup(&mut conn, &client_id, access_token).await {
+        let mut tracker = match setup(&mut conn, generation, &client_id, access_token).await {
             Ok((tracker, refresh_token)) => {
                 info!("[discord-rpc] Connected");
-                set_rpc_connected(true);
+                if is_current(generation) {
+                    set_rpc_connected(true);
+                }
                 let _ = ready_tx.send(Ok(refresh_token));
                 tracker
             }
@@ -691,7 +841,9 @@ mod connection {
             Ok(()) => info!("[discord-rpc] Discord closed the connection"),
             Err(e) => error!("[discord-rpc] Connection error: {}", e),
         }
-        set_rpc_connected(false);
-        clear_channel_info();
+        if is_current(generation) {
+            set_rpc_connected(false);
+            clear_channel_info();
+        }
     }
 }
