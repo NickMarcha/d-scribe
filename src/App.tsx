@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Settings } from "./components/Settings";
 import { Session } from "./components/Session";
-import { UpdateNotice } from "./components/UpdateNotice";
+import { UpdateCheck, UpdateNotice, useUpdater } from "./components/UpdateNotice";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import "./App.css";
@@ -14,6 +14,7 @@ function App() {
   const [appDataDir, setAppDataDir] = useState<string>("");
   const [logFilePath, setLogFilePath] = useState<string>("");
   const [version, setVersion] = useState<string>("");
+  const updater = useUpdater();
   const [discordState, setDiscordState] = useState<DiscordState | null>(null);
   const [discordRunning, setDiscordRunning] = useState<boolean>(false);
   const [channelInfo, setChannelInfo] = useState<{
@@ -89,7 +90,7 @@ function App() {
           </button>
         </nav>
         <div className="toolbar-right">
-          <UpdateNotice />
+          <UpdateNotice updater={updater} />
           <div
             className={`discord-status discord-status--${statusClass}`}
             title={
@@ -151,7 +152,7 @@ function App() {
               <p className="paths-hint">
                 {version && (
                   <>
-                    Version {version}
+                    Version {version} <UpdateCheck updater={updater} />
                     <br />
                   </>
                 )}

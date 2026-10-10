@@ -297,3 +297,30 @@ button.active:hover:not(:disabled) {
   color: var(--text-muted);
   margin-top: 4px;
 }
+
+/* Text-style button */
+
+.link-button,
+.link-button:hover:not(:disabled) {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-text);
+  text-decoration: underline;
+  font: inherit;
+}
+
+.link-button:disabled {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.update-check {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.update-check--error {
+  color: var(--danger);
+}
