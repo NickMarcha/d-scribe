@@ -6,8 +6,6 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscordTokens {
     pub client_id: String,
-    pub client_secret: String,
-    pub rpc_origin: String,
     pub refresh_token: String,
 }
 

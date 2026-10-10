@@ -50,10 +50,21 @@ Run the app, open Settings, and download a model (e.g. `ggml-base.en.bin`). Mode
 npm run tauri dev
 ```
 
-### 5. Connect & record
+### 5. Set up a Discord application
 
-1. Open **Settings** → connect to Discord (Client ID, Client Secret, RPC Origin). Auth is saved; you typically only need to authorize once.
-2. Join a voice channel
+d-scribe only needs a Client ID. No Client Secret or RPC Origin.
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
+2. On the **OAuth2** page, turn on **Public Client**.
+3. On the same page, add `https://localhost` under **Redirects**.
+4. Copy the **Client ID**.
+
+d-scribe asks Discord for the `identify`, `rpc.voice.read` and `guilds` scopes. Discord may only allow these for the app owner and accounts added under **App Testers**. If Connect fails with a message about permissions, add your Discord account as an App Tester.
+
+### 6. Connect & record
+
+1. Join a voice channel in Discord
+2. Open **Settings** → **Discord**, paste the Client ID and click **Connect to Discord**. Approve the popup in Discord. Auth is saved, so you usually only authorize once.
 3. Click **Start Recording**
 4. When done, click **Stop Recording** – the session is auto-saved to recent
 5. Use **Play** to listen; transcript auto-scrolls with playback

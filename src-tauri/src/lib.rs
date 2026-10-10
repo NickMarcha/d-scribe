@@ -53,11 +53,8 @@ fn get_models_dir(app: tauri::AppHandle) -> Result<String, String> {
 async fn discord_rpc_connect(
     app: tauri::AppHandle,
     client_id: String,
-    client_secret: String,
-    rpc_origin: String,
 ) -> Result<(), String> {
-    let client =
-        DiscordRpcClient::new(client_id.clone(), client_secret.clone(), rpc_origin.clone());
+    let client = DiscordRpcClient::new(client_id.clone());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let refresh_token = client.connect(tx).await?;
     if let Some(refresh) = refresh_token {
@@ -66,8 +63,6 @@ async fn discord_rpc_connect(
             &path,
             &discord_rpc::DiscordTokens {
                 client_id,
-                client_secret,
-                rpc_origin,
                 refresh_token: refresh,
             },
         )?;
@@ -94,11 +89,7 @@ async fn discord_rpc_auto_reconnect(app: tauri::AppHandle) -> Result<bool, Strin
         Some(t) => t,
         None => return Ok(false),
     };
-    let client = DiscordRpcClient::new(
-        tokens.client_id.clone(),
-        tokens.client_secret.clone(),
-        tokens.rpc_origin.clone(),
-    );
+    let client = DiscordRpcClient::new(tokens.client_id.clone());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let new_refresh = client
         .connect_with_refresh_token(tx, tokens.refresh_token)
@@ -108,8 +99,6 @@ async fn discord_rpc_auto_reconnect(app: tauri::AppHandle) -> Result<bool, Strin
             &path,
             &discord_rpc::DiscordTokens {
                 client_id: tokens.client_id,
-                client_secret: tokens.client_secret,
-                rpc_origin: tokens.rpc_origin,
                 refresh_token: refresh,
             },
         )?;

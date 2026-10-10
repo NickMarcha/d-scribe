@@ -58,8 +58,6 @@ interface RegistryModel {
 
 export function Settings() {
   const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [rpcOrigin, setRpcOrigin] = useState("https://localhost");
   const [segmentMergeBufferMs, setSegmentMergeBufferMs] = useState(1000);
   const [recentRetentionDays, setRecentRetentionDays] = useState(10);
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
@@ -150,13 +148,9 @@ export function Settings() {
     try {
       const store = await load(STORE_PATH, { defaults: {}, autoSave: true });
       const cid = await store.get<string>("client_id");
-      const secret = await store.get<string>("client_secret");
-      const origin = await store.get<string>("rpc_origin");
       const buffer = await store.get<number>("segment_merge_buffer_ms");
       const retention = await store.get<number>("recent_retention_days");
       setClientId(cid || "");
-      setClientSecret(secret || "");
-      setRpcOrigin(origin || "https://localhost");
       setSegmentMergeBufferMs(buffer ?? 1000);
       setRecentRetentionDays(retention ?? 10);
 
@@ -194,8 +188,6 @@ export function Settings() {
     try {
       const store = await load(STORE_PATH, { defaults: {}, autoSave: true });
       await store.set("client_id", clientId);
-      await store.set("client_secret", clientSecret);
-      await store.set("rpc_origin", rpcOrigin);
       await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
       await store.set("recent_retention_days", recentRetentionDays);
       await store.set("remote_sources", remoteSources);
@@ -363,11 +355,7 @@ export function Settings() {
   async function connectDiscord() {
     setStatus("Connecting...");
     try {
-      await invoke("discord_rpc_connect", {
-        clientId,
-        clientSecret,
-        rpcOrigin,
-      });
+      await invoke("discord_rpc_connect", { clientId });
       setStatus("Connected! Join a voice channel to start.");
     } catch (e) {
       setStatus(`Connection failed: ${e}`);
@@ -456,7 +444,7 @@ export function Settings() {
           {discordExpanded && (
             <div className="collapsible-content">
               <p className="settings-hint">
-                Enter your Discord application credentials. Each user needs their own Discord app.
+                d-scribe connects to Discord with the Client ID of a Discord application.
               </p>
               <button
                 type="button"
@@ -478,11 +466,15 @@ export function Settings() {
                         Discord Developer Portal
                       </button>
                     </li>
-                    <li>Click &quot;New Application&quot; and name it (e.g. &quot;d-scribe&quot;)</li>
-                    <li>In the app, open &quot;OAuth2&quot; → copy the <strong>Client ID</strong></li>
-                    <li>In &quot;OAuth2&quot; → &quot;Client Secret&quot; → copy <strong>Client Secret</strong></li>
-                    <li>Add <code>https://localhost</code> to OAuth2 Redirects and RPC Origins if needed.</li>
-                    <li>Authorization happens in a Discord popup when you click Connect.</li>
+                    <li>Click &quot;New Application&quot; and give it a name, for example &quot;d-scribe&quot;.</li>
+                    <li>Open the &quot;OAuth2&quot; page. Turn on <strong>Public Client</strong> and save.</li>
+                    <li>On the same page, add <code>https://localhost</code> under Redirects and save.</li>
+                    <li>Copy the <strong>Client ID</strong> from the &quot;OAuth2&quot; page and paste it below.</li>
+                    <li>Join a voice channel in Discord, then click Connect to Discord and approve the popup.</li>
+                    <li>
+                      If Discord says the app is not allowed to use these permissions, open &quot;App
+                      Testers&quot; in the Developer Portal and add your Discord account.
+                    </li>
                   </ol>
                 </div>
               )}
@@ -494,26 +486,6 @@ export function Settings() {
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
                   placeholder="Your Discord app Client ID"
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="client-secret">Client Secret</label>
-                <input
-                  id="client-secret"
-                  type="password"
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  placeholder="Your Discord app Client Secret"
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="rpc-origin">RPC Origin</label>
-                <input
-                  id="rpc-origin"
-                  type="text"
-                  value={rpcOrigin}
-                  onChange={(e) => setRpcOrigin(e.target.value)}
-                  placeholder="https://localhost"
                 />
               </div>
               <div className="button-row">
