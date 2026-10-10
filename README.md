@@ -8,9 +8,10 @@ It's a personal project, so expect rough edges. It only runs on Windows for now,
 
 ## What it does
 
-- Records Discord audio (loopback) and your microphone as two separate WAV files.
+- Records Discord's audio and your microphone as two separate WAV files. Only Discord is captured, whatever output device it uses, so music or game sound doesn't end up in the recording.
 - Splits the recording into segments using Discord RPC speaking events, so each segment has a speaker.
-- Transcribes each segment with Whisper, either after the call or live while recording.
+- Transcribes each segment with Whisper, either after the call or live while recording. Runs on an NVIDIA GPU if you download the GPU engine.
+- Handles groups that switch between Norwegian (or another language) and English: each turn is checked for English first, then transcribed with the right model.
 - Shows word count, speaking time and words per minute for each speaker.
 - Exports transcripts to SRT or VTT.
 - Lists every recording by day, with who spoke, where and for how long. Filter by server, channel or person, or search.
@@ -24,7 +25,6 @@ It's a personal project, so expect rough edges. It only runs on Windows for now,
 - Node.js and npm
 - Rust (for Tauri)
 - Discord desktop app, running (for the RPC connection)
-- The Whisper binary, which transcription needs (see below)
 
 ## Quick start
 
@@ -34,27 +34,21 @@ It's a personal project, so expect rough edges. It only runs on Windows for now,
 npm install
 ```
 
-### 2. Set up Whisper
-
-On Windows, run the download script:
-
-```powershell
-.\src-tauri\binaries\download-whisper.ps1
-```
-
-For manual setup, see [src-tauri/binaries/README.md](src-tauri/binaries/README.md).
-
-### 3. Run the app
+### 2. Run the app
 
 ```bash
 npm run tauri dev
 ```
 
-### 4. Download a Whisper model
+### 3. Download a Whisper model
 
 Open Settings, expand **Manage models** and download a model such as `base.en`. Models go in `%APPDATA%/d-scribe/models/`. Under **Selected models**, pick which model each language uses for live and regular transcription.
 
-### 5. Get access to Discord
+The Whisper engine itself (whisper.cpp) downloads the first time you transcribe. If you have an NVIDIA graphics card, click **Download GPU engine** under **Manage models**. It's a 650 MB download and makes large models about 10 times faster.
+
+**Norwegian and English.** Add the Norwegian language, download `nb-whisper-large` and `large-v3`, and set the Norwegian row to Regular `nb-whisper-large` and English turns `large-v3`. NB-Whisper is the most accurate model for Norwegian, but it writes English speech as Norwegian. With English turns set, large-v3 checks each turn first and keeps the English ones.
+
+### 4. Get access to Discord
 
 d-scribe reads who is speaking from your Discord client. Discord only allows this for accounts on an app's tester list, so pick one of these:
 
@@ -69,7 +63,7 @@ d-scribe reads who is speaking from your Discord client. Discord only allows thi
 
 d-scribe asks Discord for the `rpc` and `identify` scopes.
 
-### 6. Connect and record
+### 5. Connect and record
 
 1. In Settings, expand **Discord** and click **Connect to Discord**. Approve the popup in Discord. The login is saved, so you usually only do this once.
 2. Join a voice channel. You can do this before or after connecting.
@@ -77,11 +71,11 @@ d-scribe asks Discord for the `rpc` and `identify` scopes.
 4. Click **Stop recording** when you're done. The recording shows up in the list on the Session tab.
 
    To skip steps 3 and 4, turn on **Record automatically** in Settings > **Recording**. d-scribe then starts recording when you're in a voice channel or call with at least one other person, and stops when you leave or have been alone for a minute.
-5. Click **Transcribe** to run Whisper on each segment.
+5. Pick the language next to **Transcribe** and click it. The button shows how far it has got.
 6. Read the transcript in the **Read** view. Click a line to play from there. Fix speakers, split or merge segments and re-transcribe single lines in the **Edit** view. Edits save automatically.
 7. Click **Save** to keep the recording until you delete it, or **Export SRT** / **Export VTT** to get subtitle files.
 
-### 7. Summaries and notes (optional)
+### 6. Summaries and notes (optional)
 
 Settings > **AI** runs a command-line AI tool you already have on the transcript. The default is [Claude Code](https://claude.com/claude-code) (`claude -p` with all tools turned off). Swap in `ollama run llama3.1`, `llm` or `gemini` if you prefer. d-scribe sends the prompt and transcript on stdin and saves what the tool prints with the project. The prompts (summary, meeting notes, action items) are editable, and you can add your own. **Copy transcript** puts the whole transcript on the clipboard for pasting into a chat app.
 
@@ -97,8 +91,7 @@ d-scribe/
 │   │   ├── discord_rpc/ # Discord RPC, OAuth, token persistence
 │   │   ├── session/     # Recording, segments, merge buffer
 │   │   ├── project.rs   # Save/load, auto-save, purge, delete
-│   │   └── transcription/ # WAV extraction, Whisper CLI
-│   └── binaries/        # whisper-cli.exe + DLLs (run download script)
+│   │   └── transcription/ # WAV extraction, whisper.cpp engine download and server
 └── docs/
 ```
 
@@ -109,6 +102,7 @@ d-scribe/
 | Saved projects | `%APPDATA%/d-scribe/projects/` |
 | Unsaved recordings (deleted after the retention period or size limit) | `%APPDATA%/d-scribe/projects/recent/` |
 | Models | `%APPDATA%/d-scribe/models/` |
+| Whisper engines (CPU and GPU) | `%APPDATA%/d-scribe/engines/` |
 | Temporary transcription files | `%APPDATA%/d-scribe/transcribe_temp/` |
 
 ## Options

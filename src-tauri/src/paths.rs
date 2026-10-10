@@ -29,6 +29,11 @@ pub fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Downloaded whisper.cpp engines (CPU and GPU builds).
+pub fn engines_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("engines"))
+}
+
 /// Get the path to the settings file.
 #[allow(dead_code)]
 pub fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {

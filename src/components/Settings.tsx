@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { AiSettings } from "./AiSettings";
+import { EngineSettings } from "./EngineSettings";
 import "./Settings.css";
 
 const STORE_PATH = "settings.json";
@@ -25,6 +26,8 @@ interface LanguageSlot {
   languageCode: string;
   liveModel: string;
   regularModel: string;
+  /** Optional: turns this model detects as English are kept as English; the rest use regularModel. */
+  englishModel?: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -567,6 +570,7 @@ export function Settings() {
           />
           {manageModelsExpanded && (
             <div className="collapsible-content">
+              <EngineSettings />
               <h4 className="settings-subsection">Remote sources</h4>
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
                 Add an OpenAI-compatible API to transcribe remotely. Only the host is required.
@@ -792,6 +796,9 @@ export function Settings() {
             <div className="collapsible-content">
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
                 Pick a model for each language. Live is used during live recording, Regular when you click Transcribe. Only downloaded models and remote models with a host are listed.
+                English turns is for groups that switch between a language and English: each turn is first checked
+                with that model, and turns it hears as English keep its text. Use large-v3 with NB-Whisper, since
+                NB-Whisper writes English speech as Norwegian.
               </p>
               {readyModels.length === 0 && (
                 <p className="field-hint" style={{ color: "var(--danger)" }}>
@@ -805,6 +812,7 @@ export function Settings() {
                       <th>Language</th>
                       <th>Live</th>
                       <th>Regular</th>
+                      <th>English turns</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -835,6 +843,21 @@ export function Settings() {
                           </select>
                         </td>
                         <td>
+                          {slot.languageCode !== "en" && (
+                            <select
+                              value={slot.englishModel ?? ""}
+                              onChange={(e) => updateLanguageSlot(slot.id, { englishModel: e.target.value || undefined })}
+                            >
+                              <option value="">Off</option>
+                              {readyModels
+                                .filter((m) => m.type === "integrated")
+                                .map((m) => (
+                                  <option key={m.id} value={m.id}>{displayModelLabel(m)}</option>
+                                ))}
+                            </select>
+                          )}
+                        </td>
+                        <td>
                           <button
                             type="button"
                             className="remove-slot-btn"
@@ -863,12 +886,14 @@ export function Settings() {
                     if (addLanguagePreset === "no") {
                       const nbModel = readyModels.find((m) => m.id.startsWith("nb-whisper-"));
                       const fallback = nbModel?.id || readyModels[0]?.id || "nb-whisper-base";
+                      const english = readyModels.find((m) => m.id === "large-v3" || m.id === "large-v3-turbo");
                       addLanguageSlot({
                         id: "no",
                         label: "Norwegian",
                         languageCode: "no",
                         liveModel: fallback,
                         regularModel: fallback,
+                        englishModel: english?.id,
                       });
                       setAddLanguagePreset("");
                     }

@@ -45,6 +45,8 @@ interface LanguageSlot {
   languageCode: string;
   liveModel: string;
   regularModel: string;
+  /** Optional: turns this model detects as English are kept as English; the rest use regularModel. */
+  englishModel?: string;
 }
 
 const DEFAULT_LANGUAGE_SLOTS: LanguageSlot[] = [
@@ -513,9 +515,32 @@ export function Session() {
   }, [session, currentProjectPath]);
 
   const [transcribing, setTranscribing] = useState(false);
+  const [transcribeProgress, setTranscribeProgress] = useState<{ done: number; total: number } | null>(null);
+  const [engineDownload, setEngineDownload] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!transcribing) return;
+    const unlisteners = [
+      listen<{ done: number; total: number }>("transcribe-progress", (e) => {
+        setEngineDownload(null);
+        setTranscribeProgress(e.payload);
+      }),
+      listen<{ bytesDownloaded: number; totalBytes: number | null }>("engine-download-progress", (e) => {
+        const { bytesDownloaded, totalBytes } = e.payload;
+        setEngineDownload(totalBytes ? Math.round((bytesDownloaded / totalBytes) * 100) : 0);
+      }),
+    ];
+    return () => {
+      unlisteners.forEach((u) => u.then((fn) => fn()));
+    };
+  }, [transcribing]);
 
   /** Runs transcription with `modelId`. Returns the new texts, or null if it couldn't start or failed. */
-  async function runTranscription(modelId: string, onlyIndices?: number[]): Promise<string[] | null> {
+  async function runTranscription(
+    modelId: string,
+    onlyIndices?: number[],
+    englishModelId?: string,
+  ): Promise<string[] | null> {
     if (!session) return null;
     const modelType = getModelType(modelId);
     if (!modelType) {
@@ -535,10 +560,19 @@ export function Session() {
         return null;
       }
     }
+    let englishModelPath: string | null = null;
+    if (!remoteConfig && englishModelId && getModelType(englishModelId) === "integrated") {
+      englishModelPath = await invoke<string | null>("resolve_model_path_command", { modelName: englishModelId });
+      if (!englishModelPath) {
+        setStatus(`Download the ${englishModelId} model in Settings, or turn off English turns for this language.`);
+        return null;
+      }
+    }
     try {
       const newState = await invoke<SessionState>("transcribe_session_command", {
         state: session,
         modelPath,
+        englishModelPath,
         transcriptionMode: remoteConfig ? "remote" : "integrated",
         remoteBaseUrl: remoteConfig?.baseUrl ?? null,
         remoteModel: remoteConfig?.modelName ?? null,
@@ -556,9 +590,11 @@ export function Session() {
   async function transcribeSession() {
     if (!session) return;
     setTranscribing(true);
-    setStatus("Transcribing...");
-    const texts = await runTranscription(getRegularModelId());
+    setStatus("");
+    setTranscribeProgress(null);
+    const texts = await runTranscription(getRegularModelId(), undefined, selectedSlot?.englishModel);
     setTranscribing(false);
+    setTranscribeProgress(null);
     if (texts) {
       applyEdit({ ...transcriptData(session), texts });
       setStatus("Transcription complete.");
@@ -966,7 +1002,13 @@ export function Session() {
                 })()
               }
             >
-              {transcribing ? "Transcribing..." : "Transcribe"}
+              {!transcribing
+                ? "Transcribe"
+                : engineDownload != null
+                  ? `Downloading engine ${engineDownload}%`
+                  : transcribeProgress
+                    ? `Transcribing ${transcribeProgress.done} of ${transcribeProgress.total}`
+                    : "Loading model..."}
             </button>
           </div>
 

@@ -22,12 +22,11 @@ use session::{
 };
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
-use tauri_plugin_shell::ShellExt;
 use tokio::sync::mpsc;
 use transcription::{
-    download_model_with_progress, extract_segment, list_installed_model_names, list_models,
-    resolve_model_path, transcribe_via_api, write_wav_from_samples, RemoteTranscriptionConfig,
-    WhisperCliBackend,
+    download_engine, download_model_with_progress, engine_dir, extract_segment, installed_engine,
+    is_installed, list_installed_model_names, list_models, resolve_model_path, transcribe_via_api,
+    write_wav_from_samples, EngineKind, RemoteTranscriptionConfig, WhisperServer,
 };
 
 #[tauri::command]
@@ -219,28 +218,8 @@ fn start_recording(
         });
         let model_path = live_model_path.clone();
         let language_code = live_language_code.clone();
-        let whisper_path = (!use_remote)
-            .then(|| {
-                std::env::current_exe().ok().and_then(|p| {
-                    let dir = p.parent()?;
-                    let exe = dir.join("whisper-cli.exe");
-                    if exe.exists() {
-                        Some(exe)
-                    } else {
-                        #[cfg(windows)]
-                        {
-                            let exe = dir.join("whisper-cli-x86_64-pc-windows-msvc.exe");
-                            if exe.exists() {
-                                return Some(exe);
-                            }
-                        }
-                        None
-                    }
-                })
-            })
-            .flatten();
-        let use_sidecar =
-            !use_remote && whisper_path.is_none() && app.shell().sidecar("whisper-cli").is_ok();
+        let engines_root = paths::engines_dir(&app)?;
+        let server_log = paths::log_file_path(&app)?.with_file_name("whisper-server-live.log");
         let temp_dir = app_data_dir(&app).map(|d| d.join("transcribe_temp")).ok();
 
         // Spawn periodic flush so solo speakers get segments (pending is flushed after buffer_ms)
@@ -256,6 +235,31 @@ fn start_recording(
         });
 
         tauri::async_runtime::spawn(async move {
+            let server = if use_remote {
+                None
+            } else {
+                let model = model_path.as_ref().filter(|p| std::path::Path::new(p).exists());
+                match (installed_engine(&engines_root), model) {
+                    (Some((_, dir)), Some(m)) => {
+                        match WhisperServer::start(&dir, std::path::Path::new(m), &server_log).await {
+                            Ok(s) => Some(s),
+                            Err(e) => {
+                                warn!("[live] {}", e);
+                                None
+                            }
+                        }
+                    }
+                    (None, _) => {
+                        warn!("[live] No transcription engine installed. Transcribe once or download it in Settings.");
+                        None
+                    }
+                    (_, None) => {
+                        warn!("[live] Live model is missing: {:?}", model_path);
+                        None
+                    }
+                }
+            };
+            let lang = language_code.clone().unwrap_or_else(|| "auto".into());
             while let Some(seg) = rx.recv().await {
                 debug!(
                     "[live] segment received: {}..{} ms, user={}",
@@ -305,132 +309,15 @@ fn start_recording(
                         Some(cfg) => transcribe_via_api(cfg, &seg_path).await.unwrap_or_default(),
                         None => String::new(),
                     }
-                } else if let Some(ref exe) = whisper_path {
-                    let model = model_path
-                        .as_ref()
-                        .filter(|p| std::path::Path::new(p).exists());
-                    if model.is_none() {
-                        warn!("[live] no valid model path (missing or path does not exist), segment will have empty text");
-                    }
-                    if let Some(m) = model {
-                        let exe = exe.clone();
-                        let seg_path_buf = seg_path.clone();
-                        let model_str = m.to_string();
-                        let lang = language_code.clone();
-                        tauri::async_runtime::spawn_blocking(move || {
-                            let of_base = seg_path_buf.with_extension("");
-                            let mut args: Vec<String> = vec![
-                                "-m".into(),
-                                model_str,
-                                "-f".into(),
-                                seg_path_buf.to_string_lossy().into_owned(),
-                            ];
-                            if let Some(code) = lang {
-                                args.push("-l".into());
-                                args.push(code);
-                            }
-                            args.extend([
-                                "-np".into(),
-                                "-nt".into(),
-                                "-otxt".into(),
-                                "-of".into(),
-                                of_base.to_string_lossy().into_owned(),
-                            ]);
-                            let output = std::process::Command::new(&exe).args(&args).output();
-                            match output {
-                                Ok(out) if out.status.success() => {
-                                    let txt_path = seg_path_buf.with_extension("txt");
-                                    let raw =
-                                        std::fs::read_to_string(&txt_path).unwrap_or_default();
-                                    let _ = std::fs::remove_file(&txt_path);
-                                    raw.lines()
-                                        .filter_map(|line| {
-                                            let t = line.trim();
-                                            if t.is_empty() {
-                                                None
-                                            } else if t.starts_with('[') && t.contains("-->") {
-                                                t.find(']')
-                                                    .map(|i| t[i + 1..].trim().to_string())
-                                                    .filter(|s| !s.is_empty())
-                                            } else {
-                                                Some(t.to_string())
-                                            }
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join(" ")
-                                        .trim()
-                                        .to_string()
-                                }
-                                _ => String::new(),
-                            }
-                        })
-                        .await
-                        .unwrap_or_default()
-                    } else {
-                        String::new()
-                    }
-                } else if use_sidecar {
-                    if let Ok(sidecar) = app_handle.shell().sidecar("whisper-cli") {
-                        let model = model_path
-                            .as_ref()
-                            .filter(|p| std::path::Path::new(p).exists());
-                        if let Some(m) = model {
-                            let of_base = seg_path.with_extension("");
-                            let mut sidecar_args: Vec<String> = vec![
-                                "-m".into(),
-                                m.clone(),
-                                "-f".into(),
-                                seg_path.to_string_lossy().into_owned(),
-                            ];
-                            if let Some(ref code) = language_code {
-                                sidecar_args.push("-l".into());
-                                sidecar_args.push(code.clone());
-                            }
-                            sidecar_args.extend([
-                                "-np".into(),
-                                "-nt".into(),
-                                "-otxt".into(),
-                                "-of".into(),
-                                of_base.to_string_lossy().into_owned(),
-                            ]);
-                            let output = sidecar.args(sidecar_args).output().await;
-                            if let Ok(out) = output {
-                                if out.status.success() {
-                                    let txt_path = seg_path.with_extension("txt");
-                                    let raw =
-                                        std::fs::read_to_string(&txt_path).unwrap_or_default();
-                                    let _ = std::fs::remove_file(&txt_path);
-                                    raw.lines()
-                                        .filter_map(|line| {
-                                            let t = line.trim();
-                                            if t.is_empty() {
-                                                None
-                                            } else if t.starts_with('[') && t.contains("-->") {
-                                                t.find(']')
-                                                    .map(|i| t[i + 1..].trim().to_string())
-                                                    .filter(|s| !s.is_empty())
-                                            } else {
-                                                Some(t.to_string())
-                                            }
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join(" ")
-                                        .trim()
-                                        .to_string()
-                                } else {
-                                    String::new()
-                                }
-                            } else {
-                                String::new()
-                            }
-                        } else {
+                } else if let Some(ref server) = server {
+                    match server.transcribe(&seg_path, &lang).await {
+                        Ok(r) => r.text,
+                        Err(e) => {
+                            warn!("[live] {}", e);
                             String::new()
                         }
-                    } else {
-                        String::new()
                     }
                 } else {
-                    warn!("[live] no transcription backend (whisper-cli not found, sidecar unavailable)");
                     String::new()
                 };
                 let idx = LIVE_TRANSCRIPT_TEXTS.lock().unwrap().len();
@@ -640,11 +527,67 @@ async fn list_remote_models_command(
     list_models(&host, models_path.as_deref(), api_key.as_deref()).await
 }
 
+/// Segments shorter than this are skipped: whisper mostly hallucinates on them.
+const MIN_SEGMENT_MS: u64 = 250;
+/// With an English model set, turns it detects as English at least this confidently keep its text.
+const ENGLISH_THRESHOLD: f32 = 0.5;
+
+/// The installed engine (GPU preferred). Downloads the small CPU engine if none is installed.
+async fn ensure_engine(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let root = paths::engines_dir(app)?;
+    if let Some((_, dir)) = installed_engine(&root) {
+        return Ok(dir);
+    }
+    let app_emit = app.clone();
+    download_engine(&root, EngineKind::Cpu, move |done, total| {
+        let _ = app_emit.emit(
+            "engine-download-progress",
+            serde_json::json!({ "kind": "cpu", "bytesDownloaded": done, "totalBytes": total }),
+        );
+    })
+    .await
+}
+
+#[tauri::command]
+fn engine_status_command(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let root = paths::engines_dir(&app)?;
+    let nvidia = std::path::Path::new(r"C:\Windows\System32\nvcuda.dll").exists();
+    Ok(serde_json::json!({
+        "cpu": is_installed(&root, EngineKind::Cpu),
+        "cuda": is_installed(&root, EngineKind::Cuda),
+        "nvidia": nvidia,
+    }))
+}
+
+#[tauri::command]
+async fn download_engine_command(app: tauri::AppHandle, kind: String) -> Result<(), String> {
+    let kind = EngineKind::parse(&kind)?;
+    let root = paths::engines_dir(&app)?;
+    let app_emit = app.clone();
+    let kind_name = format!("{:?}", kind).to_lowercase();
+    download_engine(&root, kind, move |done, total| {
+        let _ = app_emit.emit(
+            "engine-download-progress",
+            serde_json::json!({ "kind": kind_name, "bytesDownloaded": done, "totalBytes": total }),
+        );
+    })
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_engine_command(app: tauri::AppHandle, kind: String) -> Result<(), String> {
+    let kind = EngineKind::parse(&kind)?;
+    let dir = engine_dir(&paths::engines_dir(&app)?, kind);
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn transcribe_session_command(
     app: tauri::AppHandle,
     state: SessionState,
     model_path: Option<String>,
+    english_model_path: Option<String>,
     transcription_mode: String,
     remote_base_url: Option<String>,
     remote_model: Option<String>,
@@ -672,45 +615,6 @@ async fn transcribe_session_command(
         && remote_model
             .as_ref()
             .map_or(false, |m| !m.trim().is_empty());
-
-    let (model_path_buf, whisper_path, use_sidecar) = if use_remote {
-        (std::path::PathBuf::new(), None, false)
-    } else {
-        let model_path =
-            model_path.ok_or("No model path. Download a model (Settings) or select one.")?;
-        let model_path_buf = std::path::Path::new(&model_path).to_path_buf();
-        if !model_path_buf.exists() {
-            return Err(format!("Model not found: {}", model_path));
-        }
-        let whisper_path = std::env::current_exe().ok().and_then(|p| {
-            let dir = p.parent()?;
-            let exe = dir.join("whisper-cli.exe");
-            if exe.exists() {
-                Some(exe)
-            } else {
-                #[cfg(windows)]
-                {
-                    let exe = dir.join("whisper-cli-x86_64-pc-windows-msvc.exe");
-                    if exe.exists() {
-                        return Some(exe);
-                    }
-                }
-                None
-            }
-        });
-        let use_sidecar = whisper_path.is_none() && app.shell().sidecar("whisper-cli").is_ok();
-        (model_path_buf, whisper_path, use_sidecar)
-    };
-
-    // Use app data dir instead of system temp - sidecar may have restricted access to %TEMP%
-    let temp_dir = app_data_dir(&app)?.join("transcribe_temp");
-    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
-
-    let mut texts = state.transcript_texts.clone();
-    while texts.len() < state.segments.len() {
-        texts.push(String::new());
-    }
-
     let remote_config = use_remote.then(|| {
         RemoteTranscriptionConfig::new(
             remote_base_url.clone().unwrap_or_default(),
@@ -718,286 +622,84 @@ async fn transcribe_session_command(
             remote_api_key.clone(),
         )
     });
+    let language = language_code.clone().unwrap_or_else(|| "auto".into());
 
-    debug!(
-        "[transcribe] START: {} segments, mode={}, temp_dir={}",
-        state.segments.len(),
-        if use_remote { "remote" } else { "integrated" },
-        temp_dir.to_string_lossy()
-    );
-
-    let current_exe = std::env::current_exe().ok();
-    debug!(
-        "[transcribe] mode: whisper_path={:?}, use_sidecar={}, current_exe={:?}",
-        whisper_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string()),
-        use_sidecar,
-        current_exe
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-    );
-    if !use_remote && whisper_path.is_none() && !use_sidecar {
-        warn!(
-            "[transcribe] No whisper binary found. Looked for whisper-cli.exe next to {:?}",
-            current_exe
-                .as_ref()
-                .and_then(|p| p.parent().map(|d| d.to_string_lossy().to_string()))
-        );
-    }
-
-    for (i, seg) in state.segments.iter().enumerate() {
-        if only_indices.as_ref().is_some_and(|only| !only.contains(&i)) {
-            continue;
+    // Local: one server per model, started once for the whole recording.
+    let (main_server, english_server) = if use_remote {
+        (None, None)
+    } else {
+        let model = model_path.ok_or("No model selected. Download a model in Settings.")?;
+        if !std::path::Path::new(&model).exists() {
+            return Err(format!("Model not found: {}", model));
         }
-        let is_local = state
-            .self_user_id
-            .as_ref()
-            .map_or(false, |id| id == &seg.user_id);
-        let source_path = if is_local { mic_path } else { loopback_path };
-        let segment_path = temp_dir.join(format!("seg_{}.wav", i));
+        let engine = ensure_engine(&app).await?;
+        let logs = paths::log_file_path(&app)?;
+        let main = WhisperServer::start(&engine, std::path::Path::new(&model), &logs.with_file_name("whisper-server.log")).await?;
+        let english = match english_model_path.filter(|p| language != "en" && p != &model) {
+            Some(p) => {
+                if !std::path::Path::new(&p).exists() {
+                    return Err(format!("English model not found: {}", p));
+                }
+                Some(WhisperServer::start(&engine, std::path::Path::new(&p), &logs.with_file_name("whisper-server-en.log")).await?)
+            }
+            None => None,
+        };
+        (Some(main), english)
+    };
 
-        // Skip empty segments
-        if seg.end_ms <= seg.start_ms {
+    let temp_dir = app_data_dir(&app)?.join("transcribe_temp");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+
+    let mut texts = state.transcript_texts.clone();
+    texts.resize(state.segments.len(), String::new());
+
+    let todo: Vec<usize> = (0..state.segments.len())
+        .filter(|i| only_indices.as_ref().map_or(true, |only| only.contains(i)))
+        .collect();
+    log::info!(
+        "[transcribe] {} segments, mode={}, language={}, english routing={}",
+        todo.len(),
+        if use_remote { "remote" } else { "local" },
+        language,
+        english_server.is_some()
+    );
+
+    for (n, &i) in todo.iter().enumerate() {
+        let _ = app.emit("transcribe-progress", serde_json::json!({ "done": n, "total": todo.len() }));
+        let seg = &state.segments[i];
+        if seg.end_ms < seg.start_ms + MIN_SEGMENT_MS {
             texts[i] = String::new();
             continue;
         }
-
+        let is_local = state.self_user_id.as_ref().map_or(false, |id| id == &seg.user_id);
+        let source_path = if is_local { mic_path } else { loopback_path };
+        let segment_path = temp_dir.join(format!("seg_{}.wav", i));
         extract_segment(source_path, &segment_path, seg.start_ms, seg.end_ms)?;
-        let seg_size = std::fs::metadata(&segment_path)
-            .ok()
-            .map(|m| m.len())
-            .unwrap_or(0);
-        let segment_path_str = segment_path.to_string_lossy().to_string();
-        debug!(
-            "[transcribe] segment {}: {} -> {} ms, source={:?}, seg_file={}, seg_size_bytes={}",
-            i, seg.start_ms, seg.end_ms, source_path, segment_path_str, seg_size
-        );
 
-        let result = if use_remote {
-            let config = remote_config.as_ref().ok_or("Remote config missing")?;
+        let result = if let Some(config) = &remote_config {
             transcribe_via_api(config, &segment_path).await
-        } else if let Some(ref whisper_exe) = whisper_path {
-            // Run whisper directly - same process, full file access
-            debug!(
-                "[transcribe] segment {}: using direct Command, exe={:?}",
-                i, whisper_exe
-            );
-            let txt_path = segment_path.with_extension("txt");
-            let of_base = segment_path.with_extension("");
-            let mut args: Vec<&str> = vec![
-                "-m",
-                model_path_buf.to_str().unwrap(),
-                "-f",
-                &segment_path_str,
-            ];
-            if let Some(ref code) = language_code {
-                args.push("-l");
-                args.push(code);
-            }
-            args.extend(["-np", "-nt", "-otxt", "-of", of_base.to_str().unwrap()]);
-            let output = std::process::Command::new(whisper_exe)
-                .args(args)
-                .output()
-                .map_err(|e| format!("Failed to run whisper: {}", e))?;
-            let exit = output.status.code().unwrap_or(-1);
-            let stderr_s = String::from_utf8_lossy(&output.stderr);
-            let stdout_s = String::from_utf8_lossy(&output.stdout);
-            debug!(
-                "[transcribe] segment {}: Whisper exit={}, stderr_len={}, stdout_len={}, txt_exists={}",
-                i,
-                exit,
-                stderr_s.len(),
-                stdout_s.len(),
-                txt_path.exists()
-            );
-            if !output.status.success() {
-                warn!(
-                    "[transcribe] segment {}: Whisper failed. stderr={:?} stdout={:?}",
-                    i,
-                    stderr_s.chars().take(500).collect::<String>(),
-                    stdout_s.chars().take(500).collect::<String>()
-                );
-            }
-            if output.status.success() {
-                let raw = std::fs::read_to_string(&txt_path).unwrap_or_default();
-                debug!(
-                    "[transcribe] segment {}: txt raw len={}, content={:?}",
-                    i,
-                    raw.len(),
-                    raw.chars().take(200).collect::<String>()
-                );
-                let text = raw
-                    .lines()
-                    .filter_map(|line| {
-                        let t = line.trim();
-                        if t.is_empty() {
-                            None
-                        } else if t.starts_with('[') && t.contains("-->") {
-                            t.find(']')
-                                .map(|i| t[i + 1..].trim().to_string())
-                                .filter(|s| !s.is_empty())
-                        } else {
-                            Some(t.to_string())
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .trim()
-                    .to_string();
-                let _ = std::fs::remove_file(&txt_path);
-                debug!(
-                    "[transcribe] segment {}: parsed text len={}, text={:?}",
-                    i,
-                    text.len(),
-                    text.chars().take(100).collect::<String>()
-                );
-                Ok(text)
-            } else {
-                Err(format!("Whisper failed: {}", stderr_s.trim()))
-            }
-        } else if use_sidecar {
-            debug!("[transcribe] segment {}: using sidecar", i);
-            let sidecar = app.shell().sidecar("whisper-cli").map_err(|e| {
-                format!(
-                    "Whisper sidecar failed: {}. Place whisper-cli-x86_64-pc-windows-msvc.exe in src-tauri/binaries/ (see README there).",
-                    e
-                )
-            })?;
-            // Use -otxt -of to write to file: sidecar stdout capture can be unreliable
-            let txt_path = segment_path.with_extension("txt");
-            let of_base_str = segment_path
-                .with_extension("")
-                .to_string_lossy()
-                .into_owned();
-            let mut sidecar_args: Vec<String> = vec![
-                "-m".into(),
-                model_path_buf.to_string_lossy().into_owned(),
-                "-f".into(),
-                segment_path_str.clone(),
-            ];
-            if let Some(ref code) = language_code {
-                sidecar_args.push("-l".into());
-                sidecar_args.push(code.clone());
-            }
-            sidecar_args.extend([
-                "-np".into(),
-                "-nt".into(),
-                "-otxt".into(),
-                "-of".into(),
-                of_base_str,
-            ]);
-            let output = sidecar
-                .args(sidecar_args)
-                .output()
-                .await
-                .map_err(|e| format!("Failed to run whisper: {}", e))?;
-            let exit = output.status.code().unwrap_or(-1);
-            let stderr_s = String::from_utf8_lossy(&output.stderr);
-            let stdout_s = String::from_utf8_lossy(&output.stdout);
-            debug!(
-                "[transcribe] segment {}: sidecar exit={}, txt_exists={}, stderr_len={}, stdout_len={}",
-                i, exit, txt_path.exists(), stderr_s.len(), stdout_s.len()
-            );
-            if !output.status.success() {
-                warn!(
-                    "[transcribe] segment {}: sidecar failed. stderr={:?} stdout={:?}",
-                    i,
-                    stderr_s.chars().take(500).collect::<String>(),
-                    stdout_s.chars().take(500).collect::<String>()
-                );
-            }
-            if output.status.success() {
-                let raw = std::fs::read_to_string(&txt_path).unwrap_or_default();
-                debug!(
-                    "[transcribe] segment {}: sidecar txt raw len={}, content={:?}",
-                    i,
-                    raw.len(),
-                    raw.chars().take(200).collect::<String>()
-                );
-                let text = raw
-                    .lines()
-                    .filter_map(|line| {
-                        let t = line.trim();
-                        if t.is_empty() {
-                            None
-                        } else if t.starts_with('[') && t.contains("-->") {
-                            t.find(']')
-                                .map(|i| t[i + 1..].trim().to_string())
-                                .filter(|s| !s.is_empty())
-                        } else {
-                            Some(t.to_string())
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .trim()
-                    .to_string();
-                let _ = std::fs::remove_file(&txt_path);
-                debug!(
-                    "[transcribe] segment {}: sidecar parsed text len={}, text={:?}",
-                    i,
-                    text.len(),
-                    text.chars().take(100).collect::<String>()
-                );
-                Ok(text)
-            } else {
-                let err_msg = if stderr_s.trim().is_empty() && !stdout_s.trim().is_empty() {
-                    format!("exit code {} (stdout: {})", exit, stdout_s.trim())
-                } else if stderr_s.trim().is_empty() {
-                    format!("exit code {} (no stderr)", exit)
-                } else {
-                    format!("{}", stderr_s.trim())
-                };
-                Err(format!("Whisper failed: {}", err_msg))
-            }
         } else {
-            debug!(
-                "[transcribe] segment {}: using WhisperCliBackend fallback",
-                i
-            );
-            let backend = WhisperCliBackend::new(
-                Some(model_path_buf.to_string_lossy().into_owned()),
-                None,
-                language_code.clone(),
-            );
-            backend.transcribe_file(&segment_path)
-        };
-
-        match &result {
-            Ok(t) => {
-                debug!(
-                    "[transcribe] segment {}: SUCCESS, text len={}, preview={:?}",
-                    i,
-                    t.len(),
-                    t.chars().take(80).collect::<String>()
-                );
-                texts[i] = t.to_string();
+            let main = main_server.as_ref().expect("local mode has a server");
+            match &english_server {
+                Some(en) => match en.transcribe(&segment_path, "auto").await {
+                    Ok(r) if r.english_prob >= ENGLISH_THRESHOLD => Ok(r.text),
+                    Ok(_) => main.transcribe(&segment_path, &language).await.map(|r| r.text),
+                    Err(e) => Err(e),
+                },
+                None => main.transcribe(&segment_path, &language).await.map(|r| r.text),
             }
+        };
+        let _ = std::fs::remove_file(&segment_path);
+
+        match result {
+            Ok(t) => texts[i] = t,
             Err(e) => {
-                warn!("[transcribe] segment {}: FAILED: {}", i, e);
-                let msg = if use_sidecar {
-                    e.to_string()
-                } else if e.contains("program not found") || e.contains("Failed to run whisper") {
-                    format!(
-                        "{}. Download whisper from https://github.com/ggml-org/whisper.cpp/releases, extract whisper-cli.exe, rename to whisper-cli-x86_64-pc-windows-msvc.exe, place in src-tauri/binaries/ (see README there).",
-                        e
-                    )
-                } else {
-                    e.to_string()
-                };
-                texts[i] = format!("[Transcription error: {}]", msg);
+                warn!("[transcribe] segment {}: {}", i, e);
+                texts[i] = format!("[Transcription error: {}]", e);
             }
         }
-        let _ = std::fs::remove_file(&segment_path);
     }
-
-    let non_empty: usize = texts.iter().filter(|t| !t.is_empty()).count();
-    debug!(
-        "[transcribe] DONE: {} segments, {} non-empty texts",
-        texts.len(),
-        non_empty
-    );
+    let _ = app.emit("transcribe-progress", serde_json::json!({ "done": todo.len(), "total": todo.len() }));
 
     Ok(SessionState {
         transcript_texts: texts,
@@ -1155,6 +857,9 @@ pub fn run() {
             open_models_dir_command,
             list_remote_models_command,
             transcribe_session_command,
+            engine_status_command,
+            download_engine_command,
+            remove_engine_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

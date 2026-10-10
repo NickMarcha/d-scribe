@@ -1,6 +1,6 @@
 [package]
 name = "d-scribe"
-version = "0.1.5"
+version = "0.1.6"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -48,8 +48,10 @@ hound = "3"
 chrono = "0.4"
 whisper-rs = { version = "0.4", optional = true }
 vosk = { version = "0.3", optional = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 wasapi = "0.22"
 
 [target.'cfg(not(windows))'.dependencies]

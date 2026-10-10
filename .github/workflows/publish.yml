@@ -34,9 +34,6 @@ jobs:
         with:
           workspaces: 'src-tauri'
 
-      - name: download whisper binary
-        run: .\src-tauri\binaries\download-whisper.ps1
-
       - name: install frontend dependencies
         run: npm install
 
