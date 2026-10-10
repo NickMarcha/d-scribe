@@ -53,15 +53,30 @@ npm run tauri dev
 
 Open Settings, expand **Manage models** and download a model such as `base.en`. Models go in `%APPDATA%/d-scribe/models/`. Under **Selected models**, pick which model each language uses for live and regular transcription.
 
-### 5. Connect and record
+### 5. Set up a Discord application
 
-1. In Settings, expand **Discord**, enter your client ID, client secret and RPC origin, then click **Connect to Discord**. The login is saved, so you usually only authorize once.
-2. Join a voice channel.
+d-scribe needs a Discord application of your own, but only its client ID.
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
+2. On the **OAuth2** page, turn on **Public Client**.
+3. On the same page, add `https://localhost` under **Redirects**.
+4. Copy the **Client ID**.
+
+d-scribe asks Discord for the `identify`, `rpc.voice.read` and `guilds` scopes. Discord may only grant these to the app owner and accounts listed under **App Testers**. If Connect fails with a message about permissions, add your Discord account as an App Tester.
+
+### 6. Connect and record
+
+1. In Settings, expand **Discord**, paste the client ID and click **Connect to Discord**. Approve the popup in Discord. The login is saved, so you usually only do this once.
+2. Join a voice channel. You can do this before or after connecting.
 3. Click **Start recording**, or **Start live recording** to see text appear during the call.
 4. Click **Stop recording** when you're done. The session is saved to the recent folder.
-5. Click **Play** to listen back. The transcript scrolls with the audio.
-6. Click **Transcribe** to run Whisper on each segment.
+5. Click **Transcribe** to run Whisper on each segment.
+6. Read the transcript in the **Read** view. Click a line to play from there. Fix speakers, split or merge segments and re-transcribe single lines in the **Edit** view. Edits save automatically.
 7. Click **Save project** to move the session out of the recent folder, or **Export SRT** / **Export VTT** to get subtitle files.
+
+### 7. Summaries and notes (optional)
+
+Settings > **AI** runs a command-line AI tool you already have on the transcript. The default is [Claude Code](https://claude.com/claude-code) (`claude -p` with all tools turned off). Swap in `ollama run llama3.1`, `llm` or `gemini` if you prefer. d-scribe sends the prompt and transcript on stdin and saves what the tool prints with the project. The prompts (summary, meeting notes, action items) are editable, and you can add your own. **Copy transcript** puts the whole transcript on the clipboard for pasting into a chat app.
 
 ## Project structure
 
@@ -115,11 +130,7 @@ Plain `RUST_LOG=debug` floods the terminal with WASAPI trace logs.
 
 ## Planned features
 
-- Summaries of transcripts using an LLM.
-- A meeting notes workflow that turns a transcript into structured notes.
-- Debate analysis that pulls out arguments, positions and rebuttals.
-- Custom workflows with your own LLM prompts and output formats.
-- Support for local models (Ollama, llama.cpp) and remote APIs (OpenAI, Anthropic and others).
+- Debate analysis that pulls out arguments, positions and rebuttals. A custom AI prompt gets you most of the way today.
 - Mute-aware recording. When someone mutes in Discord, the app stops recording their audio stream.
 
 ## License
