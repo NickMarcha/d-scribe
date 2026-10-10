@@ -81,5 +81,6 @@ Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording**
 | `src-tauri/src/transcription/remote_api.rs` | `transcribe_via_api`, `list_models` (OpenAI-compatible API) |
 | `src-tauri/src/session/recorder.rs` | Segments, merge buffer, speaking events |
 | `src/components/Session.tsx` | Main UI, project list, playback, delete modal |
+| `src/components/Transcript.tsx` | Reader (grouped by speaker, search, click to seek) and editor (speaker, split, merge, delete, re-transcribe one segment). Edit ops live in `transcriptOps.ts`; undo history and auto-save in `Session.tsx` |
 | `src/components/Settings.tsx` | Settings UI, remote sources, model registry, slot dropdowns |
 | `src-tauri/tauri.conf.json` | `externalBin: ["binaries/whisper-cli"]` |

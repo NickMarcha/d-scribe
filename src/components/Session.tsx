@@ -5,6 +5,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { load } from "@tauri-apps/plugin-store";
 import { StatsPanel } from "./StatsPanel";
 import { PlaybackBar } from "./PlaybackBar";
+import { Transcript, type Speaker } from "./Transcript";
+import { setText, type TranscriptData } from "./transcriptOps";
 import "./Session.css";
 
 interface SessionSegment {
@@ -71,7 +73,7 @@ export function Session() {
   const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null);
   const [liveSegments, setLiveSegments] = useState<SessionSegment[]>([]);
   const [liveTexts, setLiveTexts] = useState<string[]>([]);
-  const [statsCollapsed, setStatsCollapsed] = useState(false);
+  const [statsCollapsed, setStatsCollapsed] = useState(true);
   const [playbackCurrentTime, setPlaybackCurrentTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [languageSlots, setLanguageSlots] = useState<LanguageSlot[]>(DEFAULT_LANGUAGE_SLOTS);
@@ -80,7 +82,14 @@ export function Session() {
   const [modelRegistry, setModelRegistry] = useState<{ id: string; type: "integrated" | "remote"; sourceId?: string; modelName?: string }[]>([]);
   const audioRemoteRef = useRef<HTMLAudioElement | null>(null);
   const audioLocalRef = useRef<HTMLAudioElement | null>(null);
-  const segmentRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [retranscribeModelId, setRetranscribeModelId] = useState("");
+  const [retranscribingIndex, setRetranscribingIndex] = useState<number | null>(null);
+  const history = useRef<{ past: TranscriptData[]; future: TranscriptData[]; lastKey?: string }>({ past: [], future: [] });
+  const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
+  // Set by edits and transcription so only real changes get auto-saved.
+  const dirty = useRef(false);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   const loadProjects = useCallback(async () => {
     try {
@@ -276,9 +285,10 @@ export function Session() {
       setSession(state);
       if (state) {
         try {
-          await invoke("auto_save_project_command", { state });
-        } catch {
-          /* ignore auto-save failure */
+          const path = await invoke<string>("auto_save_project_command", { state });
+          setCurrentProjectPath(path);
+        } catch (e) {
+          setStatus(`Auto-save failed: ${e}`);
         }
       }
       setStatus(state ? "Recording stopped. You can edit the transcript and export it." : "");
@@ -356,57 +366,136 @@ export function Session() {
     }
   }
 
-  function updateSegmentText(index: number, text: string) {
-    if (!session) return;
-    const texts = [...session.transcript_texts];
-    while (texts.length <= index) texts.push("");
-    texts[index] = text;
-    setSession({ ...session, transcript_texts: texts });
+  function transcriptData(state: SessionState): TranscriptData {
+    return { segments: state.segments, texts: state.transcript_texts, liveTexts: state.live_transcript_texts };
   }
+
+  function withTranscript(state: SessionState, data: TranscriptData): SessionState {
+    return { ...state, segments: data.segments, transcript_texts: data.texts, live_transcript_texts: data.liveTexts };
+  }
+
+  function syncHistorySize() {
+    const h = history.current;
+    setHistorySize({ past: h.past.length, future: h.future.length });
+  }
+
+  function applyEdit(next: TranscriptData, coalesceKey?: string) {
+    const session = sessionRef.current;
+    if (!session) return;
+    const h = history.current;
+    if (!coalesceKey || coalesceKey !== h.lastKey) {
+      h.past.push(transcriptData(session));
+      if (h.past.length > 200) h.past.shift();
+    }
+    h.future = [];
+    h.lastKey = coalesceKey;
+    dirty.current = true;
+    setSession(withTranscript(session, next));
+    syncHistorySize();
+  }
+
+  function undo() {
+    const h = history.current;
+    const prev = h.past.pop();
+    if (!session || !prev) return;
+    h.future.push(transcriptData(session));
+    h.lastKey = undefined;
+    dirty.current = true;
+    setSession(withTranscript(session, prev));
+    syncHistorySize();
+  }
+
+  function redo() {
+    const h = history.current;
+    const next = h.future.pop();
+    if (!session || !next) return;
+    h.past.push(transcriptData(session));
+    h.lastKey = undefined;
+    dirty.current = true;
+    setSession(withTranscript(session, next));
+    syncHistorySize();
+  }
+
+  useEffect(() => {
+    history.current = { past: [], future: [] };
+    syncHistorySize();
+    dirty.current = false;
+  }, [session?.session_id]);
+
+  // Edits are saved to the open project file shortly after they happen.
+  useEffect(() => {
+    if (!session || !currentProjectPath || !dirty.current) return;
+    const timer = setTimeout(async () => {
+      dirty.current = false;
+      try {
+        await invoke("save_project_command", { path: currentProjectPath, state: session });
+      } catch (e) {
+        setStatus(`Auto-save failed: ${e}`);
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [session, currentProjectPath]);
 
   const [transcribing, setTranscribing] = useState(false);
 
-  async function transcribeSession() {
-    if (!session) return;
-    const modelId = getRegularModelId();
+  /** Runs transcription with `modelId`. Returns the new texts, or null if it couldn't start or failed. */
+  async function runTranscription(modelId: string, onlyIndices?: number[]): Promise<string[] | null> {
+    if (!session) return null;
     const modelType = getModelType(modelId);
     if (!modelType) {
       setStatus("Select a model in Settings for transcription.");
-      return;
+      return null;
     }
     const remoteConfig = modelType === "remote" ? resolveRemoteConfig(modelId) : null;
-    const useRemote = !!remoteConfig;
+    if (modelType === "remote" && !remoteConfig) {
+      setStatus("Set up a remote API source in Settings.");
+      return null;
+    }
     let modelPath: string | null = null;
-    if (!useRemote) {
+    if (!remoteConfig) {
       modelPath = await invoke<string | null>("resolve_model_path_command", { modelName: modelId });
       if (!modelPath) {
         setStatus(`Download the ${modelId} model in Settings, or pick a remote model for this language.`);
-        return;
+        return null;
       }
     }
-    if (modelType === "remote" && !remoteConfig) {
-      setStatus("Set up a remote API source in Settings.");
-      return;
-    }
-    setTranscribing(true);
-    setStatus("Transcribing...");
     try {
       const newState = await invoke<SessionState>("transcribe_session_command", {
         state: session,
-        modelPath: useRemote ? null : modelPath,
-        transcriptionMode: useRemote ? "remote" : "integrated",
-        remoteBaseUrl: useRemote ? remoteConfig!.baseUrl : null,
-        remoteModel: useRemote ? remoteConfig!.modelName : null,
-        remoteApiKey: useRemote ? remoteConfig!.apiKey : null,
+        modelPath,
+        transcriptionMode: remoteConfig ? "remote" : "integrated",
+        remoteBaseUrl: remoteConfig?.baseUrl ?? null,
+        remoteModel: remoteConfig?.modelName ?? null,
+        remoteApiKey: remoteConfig?.apiKey ?? null,
         languageCode: getLanguageCode(),
+        onlyIndices: onlyIndices ?? null,
       });
-      setSession(newState);
-      setStatus("Transcription complete.");
+      return newState.transcript_texts;
     } catch (e) {
       setStatus(`Transcription failed: ${e}`);
-    } finally {
-      setTranscribing(false);
+      return null;
     }
+  }
+
+  async function transcribeSession() {
+    if (!session) return;
+    setTranscribing(true);
+    setStatus("Transcribing...");
+    const texts = await runTranscription(getRegularModelId());
+    setTranscribing(false);
+    if (texts) {
+      applyEdit({ ...transcriptData(session), texts });
+      setStatus("Transcription complete.");
+    }
+  }
+
+  async function retranscribeSegment(index: number) {
+    if (!session) return;
+    setRetranscribingIndex(index);
+    const texts = await runTranscription(retranscribeModelId || getRegularModelId(), [index]);
+    setRetranscribingIndex(null);
+    const latest = sessionRef.current;
+    if (texts && latest) applyEdit(setText(transcriptData(latest), index, texts[index] ?? ""));
   }
 
   async function downloadModel(modelName: string) {
@@ -454,7 +543,7 @@ export function Session() {
 
       const playOne = (audio: HTMLAudioElement | null, path: string | null | undefined, vol: number) => {
         if (!audio || !path) return;
-        audio.src = convertFileSrc(path);
+        loadSource(audio, path);
         audio.volume = vol;
         audio.play().catch(() => {});
       };
@@ -469,7 +558,7 @@ export function Session() {
           const audio = mode === "remote" ? audioRemoteRef.current : audioLocalRef.current;
           const vol = mode === "remote" ? remoteVolume : localVolume;
           if (!path || !audio) return;
-          audio.src = convertFileSrc(path);
+          loadSource(audio, path);
           audio.volume = vol;
           audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         }
@@ -478,6 +567,27 @@ export function Session() {
       }
     },
     [session?.audio_paths, playbackMode, remoteVolume, localVolume]
+  );
+
+  const seekTo = useCallback(
+    (index: number) => {
+      const seg = segments[index];
+      if (!seg) return;
+      setActiveSegmentIndex(index);
+      const seconds = seg.start_ms / 1000;
+      const sources: [HTMLAudioElement | null, string | null | undefined][] = [
+        [audioRemoteRef.current, session?.audio_paths?.loopback],
+        [audioLocalRef.current, session?.audio_paths?.microphone],
+      ];
+      for (const [audio, path] of sources) {
+        if (audio && path) {
+          loadSource(audio, path);
+          audio.currentTime = seconds;
+        }
+      }
+      playAudio();
+    },
+    [segments, session?.audio_paths, playAudio]
   );
 
   const pauseAudio = useCallback(() => {
@@ -504,13 +614,7 @@ export function Session() {
     if (segments.length > 0) {
       const idx = segments.findIndex((s) => s.start_ms <= ms && ms < s.end_ms);
       if (idx !== -1) {
-        setActiveSegmentIndex((prev) => {
-          if (prev !== idx) {
-            segmentRefs.current[idx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-            return idx;
-          }
-          return prev;
-        });
+        setActiveSegmentIndex(idx);
       }
     }
   }, [segments, playbackMode]);
@@ -533,10 +637,6 @@ export function Session() {
     },
     [playbackMode, isPlaying, pauseAudio, playAudio]
   );
-
-  useEffect(() => {
-    segmentRefs.current = segmentRefs.current.slice(0, segments.length);
-  }, [segments.length]);
 
   useEffect(() => {
     setActiveSegmentIndex(null);
@@ -579,6 +679,13 @@ export function Session() {
       unlisten.then((fn) => fn());
     };
   }, [recording]);
+
+  const speakers: Speaker[] = (() => {
+    const map = new Map<string, string>();
+    for (const [id, name] of Object.entries(session?.user_labels ?? {})) map.set(id, name);
+    for (const seg of segments) if (!map.has(seg.user_id)) map.set(seg.user_id, seg.speaker_name ?? seg.user_id);
+    return [...map].map(([id, name]) => ({ id, name }));
+  })();
 
   return (
     <div className="session">
@@ -755,32 +862,23 @@ export function Session() {
               />
             </>
           )}
-          <div className="segments-list scrollable">
-            {segments.map((seg, i) => (
-              <div
-                key={i}
-                ref={(el) => {
-                  segmentRefs.current[i] = el;
-                }}
-                className={`segment ${activeSegmentIndex === i ? "active" : ""}`}
-              >
-                <div className="segment-header">
-                  <span className="speaker">{seg.speaker_name ?? seg.user_id}</span>
-                  <span className="time">
-                    {formatMs(seg.start_ms)} → {formatMs(seg.end_ms)}
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  className="segment-text"
-                  value={texts[i] ?? ""}
-                  onChange={(e) => updateSegmentText(i, e.target.value)}
-                  placeholder="No text yet"
-                  readOnly={recording}
-                />
-              </div>
-            ))}
-          </div>
+          <Transcript
+            data={recording || !session ? { segments: liveSegments, texts: liveTexts } : transcriptData(session)}
+            activeIndex={activeSegmentIndex}
+            editable={!recording && !!session}
+            speakers={speakers}
+            onSeek={seekTo}
+            onEdit={applyEdit}
+            canUndo={historySize.past > 0}
+            canRedo={historySize.future > 0}
+            onUndo={undo}
+            onRedo={redo}
+            models={modelRegistry.map((m) => ({ id: m.id, label: m.id }))}
+            retranscribeModelId={retranscribeModelId || getRegularModelId()}
+            onRetranscribeModelChange={setRetranscribeModelId}
+            onRetranscribe={retranscribeSegment}
+            retranscribingIndex={retranscribingIndex}
+          />
             </div>
           </div>
 
@@ -883,12 +981,10 @@ export function Session() {
   );
 }
 
-function formatMs(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const h = Math.floor(m / 60);
-  const ss = s % 60;
-  const mm = m % 60;
-  if (h > 0) return `${h}:${mm.toString().padStart(2, "0")}:${ss.toString().padStart(2, "0")}`;
-  return `${mm}:${ss.toString().padStart(2, "0")}`;
+
+/** Point an audio element at a file, keeping its position if it already plays that file. */
+function loadSource(audio: HTMLAudioElement, path: string) {
+  if (audio.dataset.path === path) return;
+  audio.src = convertFileSrc(path);
+  audio.dataset.path = path;
 }

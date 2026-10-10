@@ -20,6 +20,7 @@
   --danger-soft: rgba(185, 28, 28, 0.08);
   --success: #15803d;
   --warning: #a16207;
+  --highlight: rgba(234, 179, 8, 0.35);
   --overlay: rgba(28, 25, 23, 0.4);
 
   --radius: 6px;
@@ -54,6 +55,7 @@
     --danger-soft: rgba(220, 38, 38, 0.12);
     --success: #4ade80;
     --warning: #eab308;
+    --highlight: rgba(234, 179, 8, 0.3);
     --overlay: rgba(0, 0, 0, 0.55);
   }
 }

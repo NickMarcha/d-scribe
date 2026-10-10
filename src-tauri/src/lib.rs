@@ -650,6 +650,7 @@ async fn transcribe_session_command(
     remote_model: Option<String>,
     remote_api_key: Option<String>,
     language_code: Option<String>,
+    only_indices: Option<Vec<usize>>,
 ) -> Result<SessionState, String> {
     let loopback_path = state
         .audio_paths
@@ -746,6 +747,9 @@ async fn transcribe_session_command(
     }
 
     for (i, seg) in state.segments.iter().enumerate() {
+        if only_indices.as_ref().is_some_and(|only| !only.contains(&i)) {
+            continue;
+        }
         let is_local = state
             .self_user_id
             .as_ref()
