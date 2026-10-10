@@ -555,8 +555,18 @@ fn delete_project_command(path: String, delete_audio: bool) -> Result<(), String
 }
 
 #[tauri::command]
-fn purge_recent_command(app: tauri::AppHandle, retention_days: u64) -> Result<u32, String> {
-    purge_old_recent(&app, retention_days)
+fn purge_recent_command(
+    app: tauri::AppHandle,
+    retention_days: u64,
+    max_bytes: u64,
+    keep_path: Option<String>,
+) -> Result<u32, String> {
+    purge_old_recent(&app, retention_days, max_bytes, keep_path.as_deref())
+}
+
+#[tauri::command]
+fn set_project_saved_command(app: tauri::AppHandle, path: String, saved: bool) -> Result<String, String> {
+    project::set_project_saved(&app, std::path::Path::new(&path), saved)
 }
 
 #[tauri::command]
@@ -1135,6 +1145,7 @@ pub fn run() {
             auto_save_project_command,
             delete_project_command,
             purge_recent_command,
+            set_project_saved_command,
             format_project_name_command,
             export_transcript,
             list_models_command,

@@ -67,6 +67,8 @@ export function Settings() {
   const [segmentMergeBufferMs, setSegmentMergeBufferMs] = useState(1000);
   const [recentRetentionDays, setRecentRetentionDays] = useState(10);
   const [autoRecord, setAutoRecord] = useState(false);
+  const [recentMaxGb, setRecentMaxGb] = useState(20);
+  const [nameTemplate, setNameTemplate] = useState("");
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
   const [showInstructions, setShowInstructions] = useState(false);
   const [status, setStatus] = useState("");
@@ -161,6 +163,8 @@ export function Settings() {
       setSegmentMergeBufferMs(buffer ?? 1000);
       setRecentRetentionDays(retention ?? 10);
       setAutoRecord((await store.get<boolean>("auto_record")) ?? false);
+      setRecentMaxGb((await store.get<number>("recent_max_gb")) ?? 20);
+      setNameTemplate((await store.get<string>("project_name_template")) ?? "");
 
       const sources = (await store.get<RemoteSource[]>("remote_sources")) || [];
       setRemoteSources(sources);
@@ -199,6 +203,8 @@ export function Settings() {
       await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
       await store.set("recent_retention_days", recentRetentionDays);
       await store.set("auto_record", autoRecord);
+      await store.set("recent_max_gb", recentMaxGb);
+      await store.set("project_name_template", nameTemplate.trim());
       await store.set("remote_sources", remoteSources);
       await store.set("model_registry", modelRegistry);
       await store.set("language_slots", languageSlots);
@@ -427,7 +433,7 @@ export function Settings() {
                 </span>
               </div>
               <div className="form-group">
-                <label htmlFor="recent-retention">Recent sessions retention (days)</label>
+                <label htmlFor="recent-retention">Delete unsaved recordings after (days)</label>
                 <input
                   id="recent-retention"
                   type="number"
@@ -437,7 +443,35 @@ export function Settings() {
                   onChange={(e) => setRecentRetentionDays(parseInt(e.target.value, 10) || 10)}
                 />
                 <span className="field-hint">
-                  Auto-saved sessions older than this are deleted. Default is 10.
+                  Recordings you haven&apos;t saved are deleted with their audio after this many days. Default is 10.
+                </span>
+              </div>
+              <div className="form-group">
+                <label htmlFor="recent-max-gb">Space for unsaved recordings (GB)</label>
+                <input
+                  id="recent-max-gb"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={recentMaxGb}
+                  onChange={(e) => setRecentMaxGb(Math.max(0, parseFloat(e.target.value) || 0))}
+                />
+                <span className="field-hint">
+                  When unsaved recordings use more than this, the oldest are deleted. An hour of call is about 230 MB.
+                  0 means no limit. Default is 20.
+                </span>
+              </div>
+              <div className="form-group">
+                <label htmlFor="name-template">File name template</label>
+                <input
+                  id="name-template"
+                  type="text"
+                  value={nameTemplate}
+                  onChange={(e) => setNameTemplate(e.target.value)}
+                  placeholder="{guild}_{channel}_{timestamp}"
+                />
+                <span className="field-hint">
+                  Placeholders: {"{guild}"}, {"{channel}"}, {"{timestamp}"}, {"{date}"}, {"{time}"}
                 </span>
               </div>
               <div className="form-group">

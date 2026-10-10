@@ -13,7 +13,8 @@ It's a personal project, so expect rough edges. It only runs on Windows for now,
 - Transcribes each segment with Whisper, either after the call or live while recording.
 - Shows word count, speaking time and words per minute for each speaker.
 - Exports transcripts to SRT or VTT.
-- Auto-saves every session to a recent folder. Recent sessions are deleted after 10 days by default.
+- Lists every recording by day, with who spoke, where and for how long. Filter by server, channel or person, or search.
+- Unsaved recordings are deleted after 10 days or when they use more than 20 GB (both adjustable). Click **Save** on a recording to keep it until you delete it.
 - Plays back the remote audio, your local audio, or both, and scrolls the transcript along with playback.
 - Lists your projects on the start screen. Click one to open it. When you delete one, you can also delete its audio files.
 - Saves your Discord login with a refresh token and reconnects on startup.
@@ -73,12 +74,12 @@ d-scribe asks Discord for the `rpc` and `identify` scopes.
 1. In Settings, expand **Discord** and click **Connect to Discord**. Approve the popup in Discord. The login is saved, so you usually only do this once.
 2. Join a voice channel. You can do this before or after connecting.
 3. Click **Start recording**, or **Start live recording** to see text appear during the call.
-4. Click **Stop recording** when you're done. The session is saved to the recent folder.
+4. Click **Stop recording** when you're done. The recording shows up in the list on the Session tab.
 
    To skip steps 3 and 4, turn on **Record automatically** in Settings > **Recording**. d-scribe then starts recording when you're in a voice channel or call with at least one other person, and stops when you leave or have been alone for a minute.
 5. Click **Transcribe** to run Whisper on each segment.
 6. Read the transcript in the **Read** view. Click a line to play from there. Fix speakers, split or merge segments and re-transcribe single lines in the **Edit** view. Edits save automatically.
-7. Click **Save project** to move the session out of the recent folder, or **Export SRT** / **Export VTT** to get subtitle files.
+7. Click **Save** to keep the recording until you delete it, or **Export SRT** / **Export VTT** to get subtitle files.
 
 ### 7. Summaries and notes (optional)
 
@@ -106,7 +107,7 @@ d-scribe/
 | What | Where |
 |------|-------|
 | Saved projects | `%APPDATA%/d-scribe/projects/` |
-| Recent sessions (auto-saved, deleted after the retention period) | `%APPDATA%/d-scribe/projects/recent/` |
+| Unsaved recordings (deleted after the retention period or size limit) | `%APPDATA%/d-scribe/projects/recent/` |
 | Models | `%APPDATA%/d-scribe/models/` |
 | Temporary transcription files | `%APPDATA%/d-scribe/transcribe_temp/` |
 

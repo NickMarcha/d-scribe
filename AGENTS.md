@@ -8,7 +8,7 @@ App is not released yet. Do not prioritize backwards compatibility or repair log
 
 ## Overview
 
-Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WASAPI loopback + mic), tracks speakers via Discord RPC, transcribes with whisper.cpp CLI. Sessions are auto-saved to a recent folder; playback supports remote/local/both with transcript auto-scroll. Discord auth is persisted via refresh token. Auto-updates via tauri-plugin-updater (checked on startup, `src/components/UpdateNotice.tsx`).
+Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WASAPI loopback + mic), tracks speakers via Discord RPC, transcribes with whisper.cpp CLI. Recordings are auto-saved to a recent folder (unsaved) and listed by day in `RecordingsOverview.tsx`; Save moves one to the projects folder; playback supports remote/local/both with transcript auto-scroll. Discord auth is persisted via refresh token. Auto-updates via tauri-plugin-updater (checked on startup, `src/components/UpdateNotice.tsx`).
 
 ## Build & Run
 
@@ -28,7 +28,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
   - `audio/`: WASAPI capture (loopback + mic), 16 kHz mono 16-bit WAV
   - `discord_rpc/`: Discord RPC client, OAuth, token persistence (refresh token), speaking events
   - `session/`: Segment tracking, merge buffer (configurable ms), session state
-  - `project.rs`: Save/load, `auto_save_project`, `delete_project`, `purge_old_recent`, `list_projects_with_meta`
+  - `project.rs`: Save/load, `auto_save_project`, `set_project_saved`, `delete_project`, `purge_old_recent`, `list_projects_with_meta`
   - `paths.rs`: `projects_dir`, `recent_projects_dir`
   - `transcription/`: `extract_segment` (WAV time-range), Whisper CLI invocation, `remote_api` (OpenAI-compatible API)
 
@@ -48,7 +48,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 
 ## Settings
 
-Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, recent retention, auto-record), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
+Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, file name template, auto-record), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
 
 ## Gotchas
 
@@ -56,7 +56,7 @@ Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording**
 2. **Segment extraction**: Sample math is `ms * 16` for 16 kHz. Do not divide by 1000.
 3. **Direct vs sidecar**: Prefer direct `Command` for file access; sidecar can have sandbox issues on Windows.
 4. **Segment merge buffer**: Short pauses (< buffer ms) are merged; configurable in Settings.
-5. **Recent purge**: `purge_recent_command` runs when listing projects; uses `recent_retention_days` from settings.
+5. **Unsaved vs saved**: Unsaved = JSON in `projects/recent/`, saved = JSON in `projects/`. Audio always lives in `projects/`. `set_project_saved` moves only the JSON. `purge_recent_command` runs when listing; deletes unsaved recordings (JSON + audio) older than `recent_retention_days`, then the oldest until they fit in `recent_max_gb` (0 = no limit). The open recording is never purged.
 6. **No migration**: Do not add migration logic for old settings keys or registry formats before 1.0.0.
 
 ## UI and writing
@@ -74,7 +74,8 @@ Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording**
 | File | Purpose |
 |------|---------|
 | `src-tauri/src/lib.rs` | Tauri commands: transcribe, auto_save, delete, purge, list_remote_models, etc. |
-| `src-tauri/src/project.rs` | `auto_save_project`, `delete_project`, `purge_old_recent`, `list_projects_with_meta` |
+| `src-tauri/src/project.rs` | `auto_save_project`, `set_project_saved`, `delete_project`, `purge_old_recent`, `list_projects_with_meta` (duration, speakers, size) |
+| `src/components/RecordingsOverview.tsx` | Recordings list grouped by day with search and server/channel/person filters |
 | `src-tauri/src/paths.rs` | `projects_dir`, `recent_projects_dir` |
 | `src-tauri/src/transcription/wav_extract.rs` | `extract_segment` |
 | `src-tauri/src/transcription/remote_api.rs` | `transcribe_via_api`, `list_models` (OpenAI-compatible API) |

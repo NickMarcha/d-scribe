@@ -63,6 +63,11 @@
   margin-bottom: 16px;
 }
 
+.transcript-meta .back-link {
+  display: block;
+  margin-bottom: 8px;
+}
+
 .meta-badge {
   margin-left: 8px;
   padding: 1px 6px;
@@ -132,80 +137,6 @@
   font-size: 13px;
   color: var(--text-muted);
   margin-top: 4px;
-}
-
-.project-list {
-  margin: 16px 0;
-}
-
-.project-list h4 {
-  margin: 0 0 8px;
-}
-
-.project-list-items {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  max-height: 240px;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.project-list-items li {
-  border-bottom: 1px solid var(--border);
-}
-
-.project-list-items li:last-child {
-  border-bottom: none;
-}
-
-.project-list-item {
-  display: flex;
-  align-items: stretch;
-}
-
-.project-item {
-  flex: 1;
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 12px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  font-weight: 400;
-}
-
-.project-item:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: transparent;
-}
-
-.project-name {
-  display: block;
-  font-weight: 500;
-}
-
-.project-meta {
-  display: block;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.project-delete-btn {
-  padding: 0 12px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  color: var(--text-muted);
-}
-
-.project-delete-btn:hover:not(:disabled) {
-  color: var(--danger);
-  background: var(--danger-soft);
-  border-color: transparent;
 }
 
 .delete-modal-overlay {

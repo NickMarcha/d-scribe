@@ -8,6 +8,7 @@ import { PlaybackBar } from "./PlaybackBar";
 import { Transcript, type Speaker } from "./Transcript";
 import { setText, type TranscriptData } from "./transcriptOps";
 import { AiPanel } from "./AiPanel";
+import { RecordingsOverview, placeLabel, type ProjectMeta } from "./RecordingsOverview";
 import type { AiOutput } from "./aiConfig";
 import "./Session.css";
 
@@ -36,14 +37,6 @@ interface SessionState {
   ai_outputs?: AiOutput[];
 }
 
-interface ProjectMeta {
-  name: string;
-  path: string;
-  guild_name: string | null;
-  channel_name: string | null;
-  created_at: number;
-}
-
 const DEFAULT_TEMPLATE = "{guild}_{channel}_{timestamp}";
 
 interface LanguageSlot {
@@ -66,11 +59,10 @@ export function Session() {
   const [recording, setRecording] = useState(false);
   const [session, setSession] = useState<SessionState | null>(null);
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
-  const [projectsDir, setProjectsDir] = useState("");
+  const [retention, setRetention] = useState({ days: 10, maxGb: 20 });
   const [currentProjectPath, setCurrentProjectPath] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteAudio, setDeleteAudio] = useState(false);
-  const [projectNameTemplate, setProjectNameTemplate] = useState(DEFAULT_TEMPLATE);
   const [status, setStatus] = useState("");
   const [playbackMode, setPlaybackMode] = useState<"remote" | "local" | "both">("both");
   const [localVolume, setLocalVolume] = useState(1);
@@ -97,17 +89,21 @@ export function Session() {
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
+  const currentPathRef = useRef(currentProjectPath);
+  currentPathRef.current = currentProjectPath;
+
   const loadProjects = useCallback(async () => {
     try {
       const store = await load("settings.json", { defaults: {}, autoSave: true });
-      const retention = (await store.get<number>("recent_retention_days")) ?? 10;
-      await invoke("purge_recent_command", { retentionDays: retention });
-      const [list, dir] = await Promise.all([
-        invoke<ProjectMeta[]>("list_projects_with_meta_command"),
-        invoke<string>("get_projects_dir"),
-      ]);
-      setProjects(list);
-      setProjectsDir(dir);
+      const days = (await store.get<number>("recent_retention_days")) ?? 10;
+      const maxGb = (await store.get<number>("recent_max_gb")) ?? 20;
+      setRetention({ days, maxGb });
+      await invoke("purge_recent_command", {
+        retentionDays: days,
+        maxBytes: Math.round(maxGb * 1024 ** 3),
+        keepPath: currentPathRef.current,
+      });
+      setProjects(await invoke<ProjectMeta[]>("list_projects_with_meta_command"));
     } catch (e) {
       console.error("Failed to list projects:", e);
     }
@@ -121,8 +117,6 @@ export function Session() {
     (async () => {
       try {
         const store = await load("settings.json", { defaults: {}, autoSave: true });
-        const tpl = await store.get<string>("project_name_template");
-        if (tpl) setProjectNameTemplate(tpl);
         const pm = await store.get<string>("playback_mode");
         if (pm === "remote" || pm === "local" || pm === "both") setPlaybackMode(pm);
         const slots = (await store.get<LanguageSlot[]>("language_slots")) || DEFAULT_LANGUAGE_SLOTS;
@@ -231,6 +225,8 @@ export function Session() {
         invoke<string>("get_projects_dir"),
         invoke<{ guild_name?: string; channel_name?: string } | null>("get_channel_info_command"),
       ]);
+      const store = await load("settings.json", { defaults: {}, autoSave: true });
+      const projectNameTemplate = (await store.get<string>("project_name_template")) || DEFAULT_TEMPLATE;
       const guild = channelInfo?.guild_name ?? null;
       const channel = channelInfo?.channel_name ?? null;
       const name = await invoke<string>("format_project_name_command", {
@@ -243,7 +239,6 @@ export function Session() {
       const loopbackPath = `${projectsPath}/${safeName}_${timestamp}_loopback.wav`;
       const micPath = `${projectsPath}/${safeName}_${timestamp}_mic.wav`;
 
-      const store = await load("settings.json", { defaults: {}, autoSave: true });
       const bufferMs = (await store.get<number>("segment_merge_buffer_ms")) ?? 1000;
 
       let liveModelPath: string | null = null;
@@ -305,6 +300,7 @@ export function Session() {
         try {
           const path = await invoke<string>("auto_save_project_command", { state });
           setCurrentProjectPath(path);
+          currentPathRef.current = path; // so loadProjects below never purges it
         } catch (e) {
           setStatus(`Auto-save failed: ${e}`);
         }
@@ -374,29 +370,26 @@ export function Session() {
     return () => clearInterval(interval);
   }, []);
 
-  async function saveProject() {
-    if (!session) return;
+  async function backToRecordings() {
     try {
-      const path = await save({
-        defaultPath: `${projectsDir}/${session.session_id}.json`,
-        filters: [{ name: "Discord Scribe", extensions: ["json"] }],
-      });
-      if (path) {
-        await invoke("save_project_command", { path, state: session });
-        const prevPath = currentProjectPath;
-        setCurrentProjectPath(path);
-        if (prevPath && prevPath.includes("recent")) {
-          try {
-            await invoke("delete_project_command", { path: prevPath, deleteAudio: false });
-          } catch {
-            /* ignore */
-          }
-        }
-        setStatus("Project saved.");
-        loadProjects();
-      }
+      await flushPendingSave();
     } catch (e) {
-      setStatus(`Save failed: ${e}`);
+      setStatus(`Auto-save failed: ${e}`);
+      return;
+    }
+    setSession(null);
+    loadProjects();
+  }
+
+  /** Save keeps a recording until you delete it; unsaved ones are cleaned up after a while. */
+  async function setSaved(path: string, saved: boolean) {
+    try {
+      if (path === currentProjectPath) await flushPendingSave();
+      const newPath = await invoke<string>("set_project_saved_command", { path, saved });
+      if (path === currentProjectPath) setCurrentProjectPath(newPath);
+      loadProjects();
+    } catch (e) {
+      setStatus(`Could not ${saved ? "save" : "unsave"}: ${e}`);
     }
   }
 
@@ -425,7 +418,7 @@ export function Session() {
       setDeleteTarget(null);
       setDeleteAudio(false);
       loadProjects();
-      setStatus("Session deleted.");
+      setStatus("Recording deleted.");
     } catch (e) {
       setStatus(`Delete failed: ${e}`);
     }
@@ -436,7 +429,7 @@ export function Session() {
       const state = await invoke<SessionState>("load_project_command", { path });
       setSession(state);
       setCurrentProjectPath(path);
-      setStatus("Project loaded.");
+      setStatus("");
     } catch (e) {
       setStatus(`Load failed: ${e}`);
     }
@@ -763,6 +756,8 @@ export function Session() {
     };
   }, [recording]);
 
+  const isSaved = !!currentProjectPath && projects.some((p) => p.path === currentProjectPath && p.saved);
+
   const speakers: Speaker[] = (() => {
     const map = new Map<string, string>();
     for (const [id, name] of Object.entries(session?.user_labels ?? {})) map.set(id, name);
@@ -772,7 +767,7 @@ export function Session() {
 
   return (
     <div className="session">
-      <h2>Session</h2>
+      <h2>{session || recording ? "Session" : "Recordings"}</h2>
 
       {!recording && !session && (
         <div className="session-idle">
@@ -791,55 +786,6 @@ export function Session() {
               ))}
             </select>
           </div>
-          <div className="form-group">
-            <label htmlFor="project-template">Project name template</label>
-            <input
-              id="project-template"
-              type="text"
-              value={projectNameTemplate}
-              onChange={(e) => setProjectNameTemplate(e.target.value)}
-              placeholder={DEFAULT_TEMPLATE}
-            />
-            <span className="field-hint">
-              Available placeholders: {"{guild}"}, {"{channel}"}, {"{timestamp}"}, {"{date}"}, {"{time}"}
-            </span>
-          </div>
-          {projects.length > 0 && (
-            <div className="project-list">
-              <h4>Projects</h4>
-              <ul className="project-list-items">
-                {projects.map((p) => (
-                  <li key={p.path} className="project-list-item">
-                    <button
-                      type="button"
-                      className="project-item"
-                      onClick={() => loadProjectByPath(p.path)}
-                    >
-                      <span className="project-name">{p.name}</span>
-                      <span className="project-meta">
-                        {[p.guild_name, p.channel_name].filter(Boolean).join(" / ") || "—"}
-                        {p.created_at > 0 && (
-                          <> · {new Date(p.created_at * 1000).toLocaleDateString()}</>
-                        )}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="project-delete-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget(p.path);
-                        setDeleteAudio(false);
-                      }}
-                      title="Delete session"
-                    >
-                      🗑
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
           <div className="button-row">
             <button type="button" onClick={() => startRecording(false)}>
               Start recording
@@ -859,12 +805,23 @@ export function Session() {
               Start live recording
             </button>
             <button type="button" onClick={loadProject}>
-              Open project
+              Open file
             </button>
           </div>
           <p className="field-hint" style={{ marginTop: "0.5rem" }}>
             Live recording transcribes each segment as it ends. Set up a live model or remote API in Settings first.
           </p>
+          <RecordingsOverview
+            projects={projects}
+            retentionDays={retention.days}
+            maxGb={retention.maxGb}
+            onOpen={loadProjectByPath}
+            onSetSaved={setSaved}
+            onDelete={(path) => {
+              setDeleteTarget(path);
+              setDeleteAudio(false);
+            }}
+          />
         </div>
       )}
 
@@ -890,15 +847,15 @@ export function Session() {
             )}
             <div className="transcript-scroll-column">
           <div className="transcript-meta">
+            {session && !recording && (
+              <button type="button" className="link-button back-link" onClick={backToRecordings}>
+                Back to recordings
+              </button>
+            )}
             <span>
-              {recording
+              {recording || !session
                 ? "Live recording"
-                : `${session?.guild_name ?? "Unknown"} / ${session?.channel_name ?? "Unknown"}`}
-              {session?.channel_type != null && (
-                <span className="meta-badge">
-                  {session.channel_type === 1 ? "DM" : session.channel_type === 2 ? "Server" : session.channel_type === 3 ? "Group DM" : ""}
-                </span>
-              )}
+                : `${placeLabel({ guild_name: session.guild_name, channel_name: session.channel_name, channel_type: session.channel_type ?? null })}, ${new Date(session.created_at * 1000).toLocaleString()}`}
               {session?.live_mode_enabled && (
                 <span className="meta-badge">Live</span>
               )}
@@ -1014,12 +971,15 @@ export function Session() {
           </div>
 
           <div className="session-actions">
-            <button type="button" onClick={saveProject}>
-              Save project
-            </button>
-            <button type="button" onClick={() => setSession(null)}>
-              New session
-            </button>
+            {currentProjectPath && (
+              <button
+                type="button"
+                onClick={() => setSaved(currentProjectPath, !isSaved)}
+                title={isSaved ? "Saved. Click to unsave, so it gets deleted like other unsaved recordings." : "Keep this recording until you delete it"}
+              >
+                {isSaved ? "Saved" : "Save"}
+              </button>
+            )}
             {currentProjectPath && (
               <button
                 type="button"
@@ -1047,7 +1007,7 @@ export function Session() {
       {deleteTarget && (
         <div className="delete-modal-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="delete-modal" onClick={(e) => e.stopPropagation()}>
-            <h4>Delete session?</h4>
+            <h4>Delete recording?</h4>
             <label className="delete-audio-checkbox">
               <input
                 type="checkbox"
