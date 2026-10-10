@@ -7,6 +7,8 @@ import { StatsPanel } from "./StatsPanel";
 import { PlaybackBar } from "./PlaybackBar";
 import { Transcript, type Speaker } from "./Transcript";
 import { setText, type TranscriptData } from "./transcriptOps";
+import { AiPanel } from "./AiPanel";
+import type { AiOutput } from "./aiConfig";
 import "./Session.css";
 
 interface SessionSegment {
@@ -31,6 +33,7 @@ interface SessionState {
   transcript_texts: string[];
   live_transcript_texts?: string[];
   audio_paths: { loopback: string | null; microphone: string | null };
+  ai_outputs?: AiOutput[];
 }
 
 interface ProjectMeta {
@@ -392,6 +395,13 @@ export function Session() {
     dirty.current = true;
     setSession(withTranscript(session, next));
     syncHistorySize();
+  }
+
+  function updateAiOutputs(change: (list: AiOutput[]) => AiOutput[]) {
+    const latest = sessionRef.current;
+    if (!latest) return;
+    dirty.current = true;
+    setSession({ ...latest, ai_outputs: change(latest.ai_outputs ?? []) });
   }
 
   function undo() {
@@ -861,6 +871,15 @@ export function Session() {
                 }}
               />
             </>
+          )}
+          {session && !recording && (
+            <AiPanel
+              key={session.session_id}
+              data={transcriptData(session)}
+              outputs={session.ai_outputs ?? []}
+              onAdd={(output) => updateAiOutputs((list) => [...list, output])}
+              onDelete={(index) => updateAiOutputs((list) => list.filter((_, i) => i !== index))}
+            />
           )}
           <Transcript
             data={recording || !session ? { segments: liveSegments, texts: liveTexts } : transcriptData(session)}

@@ -140,7 +140,10 @@ function App() {
       </header>
 
       <div className="tab-content">
-        {activeTab === "session" && <Session />}
+        {/* Both tabs stay mounted so an open session or recording survives a visit to Settings. */}
+        <div hidden={activeTab !== "session"}>
+          <Session />
+        </div>
         {activeTab === "settings" && (
           <>
             <Settings />

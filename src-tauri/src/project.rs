@@ -1,7 +1,7 @@
 //! Project file save/load.
 
 use crate::paths;
-use crate::session::{SessionAudioPaths, SessionSegment, SessionState};
+use crate::session::{AiOutput, SessionAudioPaths, SessionSegment, SessionState};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -29,6 +29,8 @@ pub struct ProjectFile {
     #[serde(default)]
     pub live_transcript_texts: Option<Vec<String>>,
     pub audio_paths: SessionAudioPaths,
+    #[serde(default)]
+    pub ai_outputs: Vec<AiOutput>,
 }
 
 impl From<SessionState> for ProjectFile {
@@ -48,6 +50,7 @@ impl From<SessionState> for ProjectFile {
             transcript_texts: s.transcript_texts,
             live_transcript_texts: s.live_transcript_texts,
             audio_paths: s.audio_paths,
+            ai_outputs: s.ai_outputs,
         }
     }
 }
@@ -69,6 +72,7 @@ impl From<ProjectFile> for SessionState {
             transcript_texts: p.transcript_texts,
             live_transcript_texts: p.live_transcript_texts,
             audio_paths: p.audio_paths,
+            ai_outputs: p.ai_outputs,
         }
     }
 }

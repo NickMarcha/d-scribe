@@ -3,6 +3,7 @@ import { load } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { AiSettings } from "./AiSettings";
 import "./Settings.css";
 
 const STORE_PATH = "settings.json";
@@ -850,6 +851,8 @@ export function Settings() {
             </div>
           )}
         </section>
+
+        <AiSettings />
       </div>
 
       {status && <p className="status">{status}</p>}

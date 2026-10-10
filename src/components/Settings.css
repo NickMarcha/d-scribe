@@ -317,3 +317,36 @@
 .collapsible-content > .settings-subsection:first-child {
   margin-top: 0;
 }
+
+/* AI */
+
+.form-group .ai-command-input {
+  max-width: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.ai-prompt-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.ai-prompt-head {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ai-prompt-head input {
+  flex: 1;
+  font-weight: 600;
+}
+
+.ai-prompt-card textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  field-sizing: content;
+}

@@ -1,0 +1,96 @@
+.ai-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+
+.ai-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.ai-panel-bar select {
+  padding: 4px 8px;
+  min-width: 160px;
+}
+
+.ai-panel-bar button {
+  padding: 4px 12px;
+}
+
+.ai-panel-copy {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.ai-panel-error {
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--danger);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.ai-output {
+  border-top: 1px solid var(--border);
+}
+
+.ai-output-head {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+}
+
+.ai-output-head:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+
+.ai-output-name {
+  font-weight: 600;
+}
+
+.ai-output-time {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.ai-output-body {
+  padding: 0 16px 12px 32px;
+}
+
+.ai-output-text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  max-width: 80ch;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.ai-output-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ai-output-actions button {
+  font-size: 12px;
+  padding: 2px 10px;
+}
+
+.ai-output-actions .ai-output-delete:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}

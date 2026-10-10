@@ -1,3 +1,4 @@
+mod ai;
 mod audio;
 mod discord_rpc;
 mod export;
@@ -1005,6 +1006,13 @@ async fn transcribe_session_command(
     })
 }
 
+/// Runs the configured AI command with `input` on stdin and returns its stdout.
+#[tauri::command]
+async fn run_ai_command(app: tauri::AppHandle, command: String, input: String) -> Result<String, String> {
+    let work_dir = paths::app_data_dir(&app)?.join("ai_workdir");
+    ai::run_command(&command, &input, &work_dir).await
+}
+
 #[tauri::command]
 fn format_project_name_command(
     template: String,
@@ -1118,6 +1126,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            run_ai_command,
             get_app_data_dir,
             get_log_file_path,
             get_projects_dir,

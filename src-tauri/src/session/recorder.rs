@@ -62,6 +62,16 @@ pub struct SessionState {
     #[serde(default)]
     pub live_transcript_texts: Option<Vec<String>>,
     pub audio_paths: SessionAudioPaths,
+    /// Results of AI prompts run on this transcript, oldest first.
+    #[serde(default)]
+    pub ai_outputs: Vec<AiOutput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiOutput {
+    pub prompt_name: String,
+    pub output: String,
+    pub created_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -298,6 +308,7 @@ pub fn stop_session(audio_paths: SessionAudioPaths) -> Option<SessionState> {
             transcript_texts: vec![], // Filled by transcription or manual edit
             live_transcript_texts: None, // Filled by lib when stopping live recording
             audio_paths,
+            ai_outputs: Vec::new(),
         })
     } else {
         None
