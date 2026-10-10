@@ -59,6 +59,9 @@ const DEFAULT_LANGUAGE_SLOTS: LanguageSlot[] = [
   { id: "multilingual", label: "Multilingual", languageCode: "auto", liveModel: "tiny", regularModel: "large-v3" },
 ];
 
+/** How long you can be alone in the channel before an automatic recording stops. */
+const AUTO_STOP_GRACE_MS = 60_000;
+
 export function Session() {
   const [recording, setRecording] = useState(false);
   const [session, setSession] = useState<SessionState | null>(null);
@@ -191,13 +194,22 @@ export function Session() {
     };
   }
 
-  async function startRecording(liveRealtime = false) {
+  // Save pending transcript edits now, before a new recording replaces the open session.
+  async function flushPendingSave() {
+    const latest = sessionRef.current;
+    if (!dirty.current || !latest || !currentProjectPath) return;
+    dirty.current = false;
+    await invoke("save_project_command", { path: currentProjectPath, state: latest });
+  }
+
+  /** Returns whether recording started. */
+  async function startRecording(liveRealtime = false): Promise<boolean> {
     if (liveRealtime) {
       const modelId = getLiveModelId();
       const modelType = getModelType(modelId);
       if (!modelType) {
         setStatus("Select a model in Settings for live transcription.");
-        return;
+        return false;
       }
       const remoteConfig = modelType === "remote" ? resolveRemoteConfig(modelId) : null;
       const useRemote = !!remoteConfig;
@@ -205,12 +217,12 @@ export function Session() {
         const path = await invoke<string | null>("resolve_model_path_command", { modelName: modelId });
         if (!path) {
           setStatus(`Download the ${modelId} model in Settings to use live transcription.`);
-          return;
+          return false;
         }
       }
       if (modelType === "remote" && !remoteConfig) {
         setStatus("Set up a remote API source in Settings to use live transcription.");
-        return;
+        return false;
       }
     }
     setStatus("Starting...");
@@ -268,6 +280,7 @@ export function Session() {
         liveRemoteApiKey,
         liveLanguageCode: liveRealtime ? getLanguageCode() : null,
       };
+      await flushPendingSave();
       await invoke("start_recording", args);
       setRecording(true);
       setSession(null);
@@ -275,8 +288,10 @@ export function Session() {
       setLiveSegments([]);
       setLiveTexts([]);
       setStatus(liveRealtime ? "Recording with live transcription. Text appears as people speak." : "Recording. Join a voice channel and speak.");
+      return true;
     } catch (e) {
       setStatus(`Failed to start: ${e}`);
+      return false;
     }
   }
 
@@ -300,6 +315,64 @@ export function Session() {
       setStatus(`Failed to stop: ${e}`);
     }
   }
+
+  // Auto-record: start when you are in a voice channel with someone else; stop when you leave
+  // it or have been alone for AUTO_STOP_GRACE_MS. Only stops recordings it started. After a
+  // manual Stop it waits until you leave that channel before starting again.
+  const auto = useRef({ channelId: null as string | null, aloneSince: null as number | null, skipChannelId: null as string | null, busy: false });
+  const recordingRef = useRef(recording);
+  recordingRef.current = recording;
+  const recordingActions = useRef({ startRecording, stopRecording });
+  recordingActions.current = { startRecording, stopRecording };
+
+  useEffect(() => {
+    async function tick() {
+      const a = auto.current;
+      if (a.busy) return;
+      a.busy = true;
+      try {
+        const info = await invoke<{ channel_id: string; channel_name?: string; member_count?: number } | null>(
+          "get_channel_info_command"
+        );
+        const channelId = info?.channel_id ?? null;
+        const withOthers = (info?.member_count ?? 0) >= 2;
+        if (a.skipChannelId && a.skipChannelId !== channelId) a.skipChannelId = null;
+
+        if (a.channelId) {
+          if (!recordingRef.current) {
+            a.skipChannelId = a.channelId;
+            a.channelId = null;
+          } else if (channelId !== a.channelId) {
+            a.channelId = null;
+            await recordingActions.current.stopRecording();
+          } else if (withOthers) {
+            a.aloneSince = null;
+          } else if (a.aloneSince === null) {
+            a.aloneSince = Date.now();
+          } else if (Date.now() - a.aloneSince >= AUTO_STOP_GRACE_MS) {
+            a.channelId = null;
+            await recordingActions.current.stopRecording();
+          }
+          return;
+        }
+
+        if (recordingRef.current || !channelId || !withOthers || a.skipChannelId === channelId) return;
+        const store = await load("settings.json", { defaults: {}, autoSave: true });
+        if (!(await store.get<boolean>("auto_record"))) return;
+        if (await recordingActions.current.startRecording(false)) {
+          a.channelId = channelId;
+          a.aloneSince = null;
+          setStatus(`Recording started automatically in ${info?.channel_name || "the call"}.`);
+        }
+      } catch (e) {
+        console.error("Auto-record check failed:", e);
+      } finally {
+        a.busy = false;
+      }
+    }
+    const interval = setInterval(tick, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   async function saveProject() {
     if (!session) return;

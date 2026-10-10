@@ -66,6 +66,7 @@ export function Settings() {
   const [clientId, setClientId] = useState("");
   const [segmentMergeBufferMs, setSegmentMergeBufferMs] = useState(1000);
   const [recentRetentionDays, setRecentRetentionDays] = useState(10);
+  const [autoRecord, setAutoRecord] = useState(false);
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
   const [showInstructions, setShowInstructions] = useState(false);
   const [status, setStatus] = useState("");
@@ -159,6 +160,7 @@ export function Settings() {
       setClientId(cid || "");
       setSegmentMergeBufferMs(buffer ?? 1000);
       setRecentRetentionDays(retention ?? 10);
+      setAutoRecord((await store.get<boolean>("auto_record")) ?? false);
 
       const sources = (await store.get<RemoteSource[]>("remote_sources")) || [];
       setRemoteSources(sources);
@@ -196,6 +198,7 @@ export function Settings() {
       await store.set("client_id", clientId);
       await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
       await store.set("recent_retention_days", recentRetentionDays);
+      await store.set("auto_record", autoRecord);
       await store.set("remote_sources", remoteSources);
       await store.set("model_registry", modelRegistry);
       await store.set("language_slots", languageSlots);
@@ -435,6 +438,16 @@ export function Settings() {
                 />
                 <span className="field-hint">
                   Auto-saved sessions older than this are deleted. Default is 10.
+                </span>
+              </div>
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input type="checkbox" checked={autoRecord} onChange={(e) => setAutoRecord(e.target.checked)} />
+                  Record automatically
+                </label>
+                <span className="field-hint">
+                  Starts recording when you are in a voice channel or call with at least one other person. Stops
+                  when you leave or are alone for a minute. Needs Discord connected.
                 </span>
               </div>
             </div>

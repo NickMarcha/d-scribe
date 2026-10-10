@@ -74,6 +74,8 @@ d-scribe asks Discord for the `rpc` and `identify` scopes.
 2. Join a voice channel. You can do this before or after connecting.
 3. Click **Start recording**, or **Start live recording** to see text appear during the call.
 4. Click **Stop recording** when you're done. The session is saved to the recent folder.
+
+   To skip steps 3 and 4, turn on **Record automatically** in Settings > **Recording**. d-scribe then starts recording when you're in a voice channel or call with at least one other person, and stops when you leave or have been alone for a minute.
 5. Click **Transcribe** to run Whisper on each segment.
 6. Read the transcript in the **Read** view. Click a line to play from there. Fix speakers, split or merge segments and re-transcribe single lines in the **Edit** view. Edits save automatically.
 7. Click **Save project** to move the session out of the recent folder, or **Export SRT** / **Export VTT** to get subtitle files.

@@ -512,6 +512,8 @@ fn get_channel_info_command() -> Result<Option<serde_json::Value>, String> {
             "guild_name": c.guild_name,
             "self_user_id": c.self_user_id,
             "self_username": self_username,
+            // Everyone in the voice channel, including you.
+            "member_count": c.user_labels.len(),
         })
     }))
 }
