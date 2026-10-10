@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { Settings } from "./components/Settings";
 import { Session } from "./components/Session";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import "./App.css";
 
 type Tab = "session" | "settings";
@@ -11,6 +13,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<Tab>("session");
   const [appDataDir, setAppDataDir] = useState<string>("");
   const [logFilePath, setLogFilePath] = useState<string>("");
+  const [version, setVersion] = useState<string>("");
   const [discordState, setDiscordState] = useState<DiscordState | null>(null);
   const [discordRunning, setDiscordRunning] = useState<boolean>(false);
   const [channelInfo, setChannelInfo] = useState<{
@@ -55,114 +58,113 @@ function App() {
       setAppDataDir(dir);
       const logPath = await invoke<string>("get_log_file_path");
       setLogFilePath(logPath);
+      setVersion(await getVersion());
     } catch (e) {
       console.error("Failed to get paths:", e);
     }
   }
 
+  const statusClass =
+    discordState === "InVoice" ? "in-voice" : discordState === "Idle" ? "idle" : "disconnected";
+
   return (
-    <main className="container">
-      <h1>D-Scribe</h1>
-      <p className="subtitle">Transcribe Discord voice calls with speaker labels</p>
-
-      <nav className="tabs">
-        <button
-          className={activeTab === "session" ? "active" : ""}
-          onClick={() => setActiveTab("session")}
-        >
-          Session
-        </button>
-        <button
-          className={activeTab === "settings" ? "active" : ""}
-          onClick={() => {
-            setActiveTab("settings");
-            loadPaths();
-          }}
-        >
-          Settings
-        </button>
-      </nav>
-
-      {activeTab === "session" && (
-        <div className="tab-content">
-          <Session />
-        </div>
-      )}
-
-      {activeTab === "settings" && (
-        <div className="tab-content">
-          <Settings />
-          {appDataDir && (
-            <p className="paths-hint">
-              Data stored in: <code>{appDataDir}</code>
-              {logFilePath && (
-                <>
-                  <br />
-                  Log file: <code>{logFilePath}</code>
-                </>
-              )}
-            </p>
-          )}
-        </div>
-      )}
-
-      <div
-        className={`discord-status discord-status--${
-          discordState === "InVoice"
-            ? "in-voice"
-            : discordState === "Idle"
-              ? "idle"
-              : "disconnected"
-        } discord-status--expandable`}
-        title={
-          discordState === "InVoice"
-            ? "Discord RPC connected, in voice channel"
-            : discordState === "Idle"
-              ? "Discord RPC connected, not in voice channel"
-              : discordRunning
-                ? "Discord RPC not connected. Connect in Settings."
-                : "Discord is not running. Start Discord to connect."
-        }
-      >
-        <span className="discord-status-label">
-          Discord:{" "}
-          {discordState === "InVoice"
-            ? "Connected"
-            : discordState === "Idle"
-              ? "Idle"
-              : discordState === "Disconnected" && !discordRunning
-                ? "Discord not running"
-                : "Disconnected"}
-        </span>
-        {discordState === "InVoice" && channelInfo && (
-          <div className="discord-status-details">
-            {channelInfo.self_username && (
-              <div className="discord-status-row">
-                <span className="discord-status-key">User</span>
-                <span>{channelInfo.self_username}</span>
-              </div>
-            )}
-            {channelInfo.guild_name && (
-              <div className="discord-status-row">
-                <span className="discord-status-key">Server</span>
-                <span>{channelInfo.guild_name}</span>
-              </div>
-            )}
-            {channelInfo.channel_name && (
-              <div className="discord-status-row">
-                <span className="discord-status-key">Channel</span>
-                <span>{channelInfo.channel_name}</span>
-              </div>
-            )}
-            {!channelInfo.guild_name && channelInfo.channel_name && (
-              <div className="discord-status-row discord-status-hint">
-                DM / Group call
+    <div className="app">
+      <header className="app-toolbar">
+        <span className="app-name">d-scribe</span>
+        <nav className="tabs">
+          <button
+            className={activeTab === "session" ? "active" : ""}
+            onClick={() => setActiveTab("session")}
+          >
+            Session
+          </button>
+          <button
+            className={activeTab === "settings" ? "active" : ""}
+            onClick={() => {
+              setActiveTab("settings");
+              loadPaths();
+            }}
+          >
+            Settings
+          </button>
+        </nav>
+        <div className="toolbar-right">
+          <UpdateNotice />
+          <div
+            className={`discord-status discord-status--${statusClass}`}
+            title={
+              discordState === "InVoice"
+                ? undefined
+                : discordState === "Idle"
+                  ? "Connected to Discord, not in a voice channel"
+                  : discordRunning
+                    ? "Not connected. Connect in Settings."
+                    : "Start Discord to connect."
+            }
+          >
+            Discord:{" "}
+            {discordState === "InVoice"
+              ? "in voice"
+              : discordState === "Idle"
+                ? "idle"
+                : discordRunning
+                  ? "disconnected"
+                  : "not running"}
+            {discordState === "InVoice" && channelInfo && (
+              <div className="discord-status-details">
+                {channelInfo.self_username && (
+                  <div className="discord-status-row">
+                    <span className="discord-status-key">User</span>
+                    <span>{channelInfo.self_username}</span>
+                  </div>
+                )}
+                {channelInfo.guild_name && (
+                  <div className="discord-status-row">
+                    <span className="discord-status-key">Server</span>
+                    <span>{channelInfo.guild_name}</span>
+                  </div>
+                )}
+                {channelInfo.channel_name && (
+                  <div className="discord-status-row">
+                    <span className="discord-status-key">Channel</span>
+                    <span>{channelInfo.channel_name}</span>
+                  </div>
+                )}
+                {!channelInfo.guild_name && channelInfo.channel_name && (
+                  <div className="discord-status-hint">DM or group call</div>
+                )}
               </div>
             )}
           </div>
+        </div>
+      </header>
+
+      <div className="tab-content">
+        {activeTab === "session" && <Session />}
+        {activeTab === "settings" && (
+          <>
+            <Settings />
+            {appDataDir && (
+              <p className="paths-hint">
+                {version && (
+                  <>
+                    Version {version}
+                    <br />
+                  </>
+                )}
+                Data folder: <code>{appDataDir}</code>
+                {logFilePath && (
+                  <>
+                    <br />
+                    Log file: <code>{logFilePath}</code>
+                  </>
+                )}
+              </p>
+            )}
+          </>
         )}
       </div>
-    </main>
+    </div>
   );
 }
 
