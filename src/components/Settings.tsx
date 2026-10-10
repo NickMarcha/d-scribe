@@ -269,10 +269,10 @@ export function Settings() {
         apiKey: source.apiKey?.trim() || null,
       });
       setFetchedModels(models);
-      setStatus(models.length > 0 ? `Found ${models.length} models.` : "No models in response.");
+      setStatus(models.length > 0 ? `Found ${models.length} models.` : "The source returned no models.");
     } catch (e) {
       setFetchedModels([]);
-      setStatus(`Could not fetch models. Enter model name manually.`);
+      setStatus(`Could not fetch models. Type the model name instead.`);
     } finally {
       setFetchingModels(false);
     }
@@ -368,7 +368,7 @@ export function Settings() {
         clientSecret,
         rpcOrigin,
       });
-      setStatus("Connected! Join a voice channel to start.");
+      setStatus("Connected. Join a voice channel to start recording.");
     } catch (e) {
       setStatus(`Connection failed: ${e}`);
     }
@@ -401,7 +401,7 @@ export function Settings() {
 
       <div className="settings-sticky-bar">
         <button type="button" className="save-all-btn" onClick={saveSettings}>
-          {saved ? "Saved!" : "Save all settings"}
+          {saved ? "Saved" : "Save all settings"}
         </button>
       </div>
 
@@ -426,7 +426,7 @@ export function Settings() {
                   onChange={(e) => setSegmentMergeBufferMs(parseInt(e.target.value, 10) || 1000)}
                 />
                 <span className="field-hint">
-                  Min silence before splitting segments (default 1000ms). Brief pauses are merged.
+                  Pauses shorter than this stay in the same segment. Default is 1000 ms.
                 </span>
               </div>
               <div className="form-group">
@@ -440,7 +440,7 @@ export function Settings() {
                   onChange={(e) => setRecentRetentionDays(parseInt(e.target.value, 10) || 10)}
                 />
                 <span className="field-hint">
-                  Auto-saved sessions older than this are purged (default 10).
+                  Auto-saved sessions older than this are deleted. Default is 10.
                 </span>
               </div>
             </div>
@@ -456,14 +456,14 @@ export function Settings() {
           {discordExpanded && (
             <div className="collapsible-content">
               <p className="settings-hint">
-                Enter your Discord application credentials. Each user needs their own Discord app.
+                Enter the credentials of your Discord application. Each user needs their own app.
               </p>
               <button
                 type="button"
                 className="instructions-toggle"
                 onClick={() => setShowInstructions(!showInstructions)}
               >
-                {showInstructions ? "Hide" : "Show"} instructions for getting Client ID
+                {showInstructions ? "Hide" : "Show"} how to get a client ID
               </button>
               {showInstructions && (
                 <div className="instructions">
@@ -478,11 +478,11 @@ export function Settings() {
                         Discord Developer Portal
                       </button>
                     </li>
-                    <li>Click &quot;New Application&quot; and name it (e.g. &quot;d-scribe&quot;)</li>
-                    <li>In the app, open &quot;OAuth2&quot; → copy the <strong>Client ID</strong></li>
-                    <li>In &quot;OAuth2&quot; → &quot;Client Secret&quot; → copy <strong>Client Secret</strong></li>
-                    <li>Add <code>https://localhost</code> to OAuth2 Redirects and RPC Origins if needed.</li>
-                    <li>Authorization happens in a Discord popup when you click Connect.</li>
+                    <li>Click &quot;New Application&quot; and give it a name, e.g. &quot;d-scribe&quot;.</li>
+                    <li>Open &quot;OAuth2&quot; and copy the <strong>Client ID</strong>.</li>
+                    <li>On the same page, copy the <strong>Client Secret</strong>.</li>
+                    <li>If Discord asks for it, add <code>https://localhost</code> to OAuth2 Redirects and RPC Origins.</li>
+                    <li>Click Connect to Discord below and approve the popup in Discord.</li>
                   </ol>
                 </div>
               )}
@@ -493,21 +493,21 @@ export function Settings() {
                   type="text"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
-                  placeholder="Your Discord app Client ID"
+                  placeholder="Client ID of your Discord app"
                 />
               </div>
               <div className="form-group">
-                <label htmlFor="client-secret">Client Secret</label>
+                <label htmlFor="client-secret">Client secret</label>
                 <input
                   id="client-secret"
                   type="password"
                   value={clientSecret}
                   onChange={(e) => setClientSecret(e.target.value)}
-                  placeholder="Your Discord app Client Secret"
+                  placeholder="Client secret of your Discord app"
                 />
               </div>
               <div className="form-group">
-                <label htmlFor="rpc-origin">RPC Origin</label>
+                <label htmlFor="rpc-origin">RPC origin</label>
                 <input
                   id="rpc-origin"
                   type="text"
@@ -527,15 +527,15 @@ export function Settings() {
 
         <section className="settings-section collapsible">
           <CollapsibleHeader
-            title="Manage Models"
+            title="Manage models"
             expanded={manageModelsExpanded}
             onToggle={() => setManageModelsExpanded(!manageModelsExpanded)}
           />
           {manageModelsExpanded && (
             <div className="collapsible-content">
-              <h4 className="settings-subsection">Remote Sources</h4>
+              <h4 className="settings-subsection">Remote sources</h4>
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
-                Add API sources for remote transcription. Each source has host, optional path overrides, and API key.
+                Add an OpenAI-compatible API to transcribe remotely. Only the host is required.
               </p>
               {remoteSources.map((src) => (
                 <div key={src.id} className="remote-source-card">
@@ -567,7 +567,7 @@ export function Settings() {
                     />
                   </div>
                   <div className="form-group">
-                    <label>Models path (optional, for Fetch)</label>
+                    <label>Models path (optional, used by Fetch models)</label>
                     <input
                       type="text"
                       value={src.modelsPath || ""}
@@ -576,7 +576,7 @@ export function Settings() {
                     />
                   </div>
                   <div className="form-group">
-                    <label>API Key (optional)</label>
+                    <label>API key (optional)</label>
                     <input
                       type="password"
                       value={src.apiKey || ""}
@@ -597,9 +597,9 @@ export function Settings() {
                 Add source
               </button>
 
-              <h4 className="settings-subsection">Installed Models</h4>
+              <h4 className="settings-subsection">Models</h4>
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
-                Integrated = Whisper (local). Remote = API (uses a source above).
+                Integrated models run Whisper on this machine. Remote models call one of the sources above.
               </p>
               {modelsDir && (
                 <div className="models-dir-row">
@@ -671,7 +671,7 @@ export function Settings() {
 
               <div className="model-add-area">
                 <div className="model-add-row">
-                  <label>Add Integrated (Whisper):</label>
+                  <label>Add Whisper model</label>
                   <select
                     value={addIntegratedModel}
                     onChange={(e) => setAddIntegratedModel(e.target.value)}
@@ -693,14 +693,14 @@ export function Settings() {
                   >
                     {modelRegistry.some((r) => r.id === addIntegratedModel)
                       ? "Download"
-                      : "Download & Add"}
+                      : "Download and add"}
                   </button>
                   {allIntegratedAdded && (
                     <span className="field-hint">All Whisper models are already in your list.</span>
                   )}
                 </div>
                 <div className="model-add-row">
-                  <label>Add Remote (API):</label>
+                  <label>Add remote model</label>
                   <select
                     value={addRemoteSourceId}
                     onChange={(e) => setAddRemoteSourceId(e.target.value)}
@@ -723,7 +723,7 @@ export function Settings() {
                     list="models-datalist"
                     value={addRemoteModel}
                     onChange={(e) => setAddRemoteModel(e.target.value)}
-                    placeholder="whisper-1 or type custom"
+                    placeholder="Model name, e.g. whisper-1"
                     className="model-input"
                   />
                   <datalist id="models-datalist">
@@ -750,18 +750,18 @@ export function Settings() {
 
         <section className="settings-section collapsible">
           <CollapsibleHeader
-            title="Selected Models"
+            title="Selected models"
             expanded={selectedModelsExpanded}
             onToggle={() => setSelectedModelsExpanded(!selectedModelsExpanded)}
           />
           {selectedModelsExpanded && (
             <div className="collapsible-content">
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
-                Select which model to use for each language. Only ready models (installed or with valid source) are listed.
+                Pick a model for each language. Live is used during live recording, Regular when you click Transcribe. Only downloaded models and remote models with a host are listed.
               </p>
               {readyModels.length === 0 && (
-                <p className="field-hint" style={{ color: "#c00" }}>
-                  No models ready. Add and install models above.
+                <p className="field-hint" style={{ color: "var(--danger)" }}>
+                  No models are ready. Add or download one under Manage models.
                 </p>
               )}
               <div className="language-slots-table-wrap">

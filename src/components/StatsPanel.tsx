@@ -150,7 +150,7 @@ export function StatsPanel({ segments, texts, collapsed, onToggleCollapsed }: St
                 <span>{s.words} words</span>
                 <span>{formatMs(s.speech_ms)}</span>
                 <span>{Math.round(s.wpm)} wpm</span>
-                <span>avg {s.avgWordLength.toFixed(1)} ch/word</span>
+                <span>{s.avgWordLength.toFixed(1)} chars/word</span>
               </div>
             ))}
           </div>

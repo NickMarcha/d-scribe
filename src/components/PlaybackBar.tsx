@@ -62,7 +62,7 @@ export function PlaybackBar({
           type="button"
           className="playback-bar-expand"
           onClick={() => setExpanded(!expanded)}
-          title={expanded ? "Collapse" : "Expand"}
+          title={expanded ? "Hide playback options" : "Show playback options"}
         >
           {expanded ? "▼" : "▲"}
         </button>
@@ -70,7 +70,7 @@ export function PlaybackBar({
       {expanded && (
         <div className="playback-bar-details">
           <div className="playback-mode">
-            <label>Playback:</label>
+            <label>Play</label>
             <button
               type="button"
               className={playbackMode === "remote" ? "active" : ""}
@@ -95,7 +95,7 @@ export function PlaybackBar({
           </div>
           <div className="volume-sliders">
             <label>
-              Remote:{" "}
+              Remote volume{" "}
               <input
                 type="range"
                 min="0"
@@ -106,7 +106,7 @@ export function PlaybackBar({
               />
             </label>
             <label>
-              Local:{" "}
+              Local volume{" "}
               <input
                 type="range"
                 min="0"

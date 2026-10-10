@@ -192,12 +192,12 @@ export function Session() {
       if (!useRemote) {
         const path = await invoke<string | null>("resolve_model_path_command", { modelName: modelId });
         if (!path) {
-          setStatus(`Download ${modelId} model in Settings for live transcription.`);
+          setStatus(`Download the ${modelId} model in Settings to use live transcription.`);
           return;
         }
       }
       if (modelType === "remote" && !remoteConfig) {
-        setStatus("Configure remote API source in Settings for live transcription.");
+        setStatus("Set up a remote API source in Settings to use live transcription.");
         return;
       }
     }
@@ -262,7 +262,7 @@ export function Session() {
       setCurrentProjectPath(null);
       setLiveSegments([]);
       setLiveTexts([]);
-      setStatus(liveRealtime ? "Recording (live)... Transcriptions will appear as you speak." : "Recording... Join a voice channel and speak.");
+      setStatus(liveRealtime ? "Recording with live transcription. Text appears as people speak." : "Recording. Join a voice channel and speak.");
     } catch (e) {
       setStatus(`Failed to start: ${e}`);
     }
@@ -281,7 +281,7 @@ export function Session() {
           /* ignore auto-save failure */
         }
       }
-      setStatus(state ? "Recording stopped. Edit transcript and export." : "");
+      setStatus(state ? "Recording stopped. You can edit the transcript and export it." : "");
       loadProjects();
     } catch (e) {
       setStatus(`Failed to stop: ${e}`);
@@ -380,12 +380,12 @@ export function Session() {
     if (!useRemote) {
       modelPath = await invoke<string | null>("resolve_model_path_command", { modelName: modelId });
       if (!modelPath) {
-        setStatus(`Download ${modelId} model in Settings, or use a Remote model for this slot.`);
+        setStatus(`Download the ${modelId} model in Settings, or pick a remote model for this language.`);
         return;
       }
     }
     if (modelType === "remote" && !remoteConfig) {
-      setStatus("Configure remote API source in Settings.");
+      setStatus("Set up a remote API source in Settings.");
       return;
     }
     setTranscribing(true);
@@ -611,7 +611,7 @@ export function Session() {
               placeholder={DEFAULT_TEMPLATE}
             />
             <span className="field-hint">
-              Placeholders: {"{guild}"}, {"{channel}"}, {"{timestamp}"}, {"{date}"}, {"{time}"}
+              Available placeholders: {"{guild}"}, {"{channel}"}, {"{timestamp}"}, {"{date}"}, {"{time}"}
             </span>
           </div>
           {projects.length > 0 && (
@@ -652,7 +652,7 @@ export function Session() {
           )}
           <div className="button-row">
             <button type="button" onClick={() => startRecording(false)}>
-              Start Recording
+              Start recording
             </button>
             <button
               type="button"
@@ -664,16 +664,16 @@ export function Session() {
                   return modelType === "remote" && !resolveRemoteConfig(modelId);
                 })()
               }
-              title="Transcribe in real time as you speak. Configure model in Settings first."
+              title="Transcribe while recording. Pick a live model in Settings first."
             >
-              Start Recording (Live)
+              Start live recording
             </button>
             <button type="button" onClick={loadProject}>
-              Open Project
+              Open project
             </button>
           </div>
           <p className="field-hint" style={{ marginTop: "0.5rem" }}>
-            Live = real-time transcription as you speak. Configure model or remote API in Settings first.
+            Live recording transcribes each segment as it ends. Set up a live model or remote API in Settings first.
           </p>
         </div>
       )}
@@ -682,7 +682,7 @@ export function Session() {
         <div className="session-recording">
           <p className="recording-indicator">● Recording</p>
           <button type="button" className="stop-btn" onClick={stopRecording}>
-            Stop Recording
+            Stop recording
           </button>
         </div>
       )}
@@ -775,7 +775,7 @@ export function Session() {
                   className="segment-text"
                   value={texts[i] ?? ""}
                   onChange={(e) => updateSegmentText(i, e.target.value)}
-                  placeholder="Transcription..."
+                  placeholder="No text yet"
                   readOnly={recording}
                 />
               </div>
@@ -825,10 +825,10 @@ export function Session() {
 
           <div className="session-actions">
             <button type="button" onClick={saveProject}>
-              Save Project
+              Save project
             </button>
             <button type="button" onClick={() => setSession(null)}>
-              New Session
+              New session
             </button>
             {currentProjectPath && (
               <button
@@ -864,7 +864,7 @@ export function Session() {
                 checked={deleteAudio}
                 onChange={(e) => setDeleteAudio(e.target.checked)}
               />
-              Also delete associated audio files (loopback + microphone WAV)
+              Also delete the audio files (loopback and microphone WAV)
             </label>
             <div className="delete-modal-actions">
               <button type="button" onClick={() => setDeleteTarget(null)}>
