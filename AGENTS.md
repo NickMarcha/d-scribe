@@ -8,7 +8,7 @@ App is not released yet. Do not prioritize backwards compatibility or repair log
 
 ## Overview
 
-Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WASAPI loopback + mic), tracks speakers via Discord RPC, transcribes with whisper.cpp CLI. Sessions are auto-saved to a recent folder; playback supports remote/local/both with transcript auto-scroll. Discord auth is persisted via refresh token.
+Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WASAPI loopback + mic), tracks speakers via Discord RPC, transcribes with whisper.cpp CLI. Sessions are auto-saved to a recent folder; playback supports remote/local/both with transcript auto-scroll. Discord auth is persisted via refresh token. Auto-updates via tauri-plugin-updater (checked on startup, `src/components/UpdateNotice.tsx`).
 
 ## Build & Run
 
@@ -45,7 +45,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 
 ## Settings
 
-Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, recent retention), **Discord** (RPC credentials), **Manage Models** (remote sources CRUD, model registry, Add Integrated/Remote), **Selected Models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
+Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, recent retention), **Discord** (RPC credentials), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
 
 ## Gotchas
 
@@ -56,10 +56,14 @@ Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording**
 5. **Recent purge**: `purge_recent_command` runs when listing projects; uses `recent_retention_days` from settings.
 6. **No migration**: Do not add migration logic for old settings keys or registry formats before 1.0.0.
 
+## UI and writing
+
+- UI follows Uncodixify: plain toolbar + underline tabs, 6px radius, 1px borders, no gradients/glows/pills, shadows max `0 2px 8px rgba(0,0,0,0.1)`. Colors come from the CSS variables in `src/App.css` (stone/zinc neutrals, muted teal accent); don't add new hex colors in components. Font: IBM Plex Sans/Mono (bundled via fontsource).
+- User-facing text follows Unslop: sentence case, plain words, no em dashes, say what a thing does.
+
 ## Planned (roadmap)
 
 - AI summary of transcripts
-- Participant stats (word count, speaking time per speaker)
 - Meeting notes workflow
 - Debate/discussion analysis (arguments, positions, rebuttals)
 - Custom workflows with configurable LLM instructions
