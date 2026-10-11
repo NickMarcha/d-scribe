@@ -19,6 +19,7 @@ It's a personal project, so expect rough edges. It only runs on Windows for now,
 - Plays back the remote audio, your local audio, or both, and scrolls the transcript along with playback.
 - Lists your projects on the start screen. Click one to open it. When you delete one, you can also delete its audio files.
 - Saves your Discord login with a refresh token and reconnects on startup.
+- Lives in the tray: closing the window keeps it running (and recording automatically). Quit from the tray menu. It can start with Windows.
 
 ## Prerequisites
 

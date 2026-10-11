@@ -341,8 +341,20 @@ export function Session() {
   const auto = useRef({ channelId: null as string | null, aloneSince: null as number | null, skipChannelId: null as string | null, busy: false });
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
-  const recordingActions = useRef({ startRecording, stopRecording });
-  recordingActions.current = { startRecording, stopRecording };
+  const recordingActions = useRef({ startRecording, stopRecording, flushPendingSave });
+  recordingActions.current = { startRecording, stopRecording, flushPendingSave };
+
+  // Quit from the tray while recording: stop and save first, then exit.
+  useEffect(() => {
+    const unlisten = listen("quit-requested", async () => {
+      if (recordingRef.current) await recordingActions.current.stopRecording();
+      await recordingActions.current.flushPendingSave();
+      await invoke("exit_app");
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
     async function tick() {

@@ -30,6 +30,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
   - `session/`: Segment tracking, merge buffer (configurable ms), session state
   - `project.rs`: Save/load, `auto_save_project`, `set_project_saved`, `delete_project`, `purge_old_recent`, `list_projects_with_meta`
   - `paths.rs`: `projects_dir`, `recent_projects_dir`
+  - `tray.rs`: tray icon and menu (status, Open, Quit). Closing the main window hides it (`on_window_event` prevents close). Quit while recording emits `quit-requested`; `Session.tsx` stops, saves and calls `exit_app`. The window is `visible: false` in `tauri.conf.json` and shown in setup unless started with `--minimized` (passed by tauri-plugin-autostart, "Start with Windows" in Settings > Recording). tauri-plugin-single-instance focuses the running copy on a second launch
   - `transcription/`: `extract_segment` (WAV time-range), `engine` (whisper.cpp download + `whisper-server` process), `remote_api` (OpenAI-compatible API)
 
 ## Conventions
@@ -49,7 +50,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 
 ## Settings
 
-Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, file name template, auto-record), **Audio** (`AudioSettings.tsx`: mic device, source for others, Test buttons; saves on change), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
+Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, file name template, auto-record, start with Windows via the autostart plugin, saved immediately), **Audio** (`AudioSettings.tsx`: mic device, source for others, Test buttons; saves on change), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
 
 ## Gotchas
 

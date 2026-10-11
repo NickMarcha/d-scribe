@@ -9,6 +9,7 @@
     "opener:default",
     "store:default",
     "shell:allow-execute",
-    "log:default"
+    "log:default",
+    "autostart:default"
   ]
 }

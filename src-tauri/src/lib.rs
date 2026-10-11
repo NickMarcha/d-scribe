@@ -6,6 +6,7 @@ mod paths;
 mod project;
 mod session;
 mod transcription;
+mod tray;
 
 use audio::{start_audio_capture, stop_audio_capture, AudioCaptureHandle, AudioSources};
 use discord_rpc::{get_channel_info, is_rpc_connected, load_tokens, save_tokens, DiscordRpcClient};
@@ -153,6 +154,16 @@ static AUDIO_HANDLE: Mutex<Option<AudioCaptureHandle>> = Mutex::new(None);
 static SESSION_AUDIO_PATHS: Mutex<Option<(String, String)>> = Mutex::new(None);
 static LIVE_TRANSCRIPT_TEXTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static WAS_LIVE_RECORDING: Mutex<bool> = Mutex::new(false);
+
+pub(crate) fn is_recording() -> bool {
+    AUDIO_HANDLE.lock().map(|h| h.is_some()).unwrap_or(false)
+}
+
+/// Quits for real (closing the window only hides it to the tray).
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
 
 #[tauri::command]
 fn start_recording(
@@ -353,6 +364,7 @@ fn start_recording(
         mic_buf,
     )?;
     *AUDIO_HANDLE.lock().unwrap() = Some(handle);
+    tray::set_recording(&app, true);
     *SESSION_AUDIO_PATHS.lock().unwrap() = Some((output_path, mic_path));
     if !live {
         *WAS_LIVE_RECORDING.lock().unwrap() = false;
@@ -380,6 +392,7 @@ async fn measure_audio_level_command(mic: bool, device_id: Option<String>) -> Re
 #[tauri::command]
 fn stop_recording(_app: tauri::AppHandle) -> Result<Option<SessionState>, String> {
     let paths = SESSION_AUDIO_PATHS.lock().unwrap().take();
+    tray::set_recording(&_app, false);
     if let Some(handle) = AUDIO_HANDLE.lock().unwrap().take() {
         stop_audio_capture(handle)?;
     }
@@ -824,6 +837,13 @@ pub fn run() {
     let _log_path = init_logger().ok();
 
     tauri::Builder::default()
+        // Must be first: a second launch (e.g. from the Start menu while in the tray) shows this
+        // window instead of starting another copy with its own Discord connection.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main_window(app)))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![tray::MINIMIZED_ARG]),
+        ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_log::Builder::default().skip_logger().build())
         .plugin(tauri_plugin_dialog::init())
@@ -832,6 +852,11 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             paths::ensure_directories(app.handle())?;
+            tray::create(app.handle())?;
+            // The window starts hidden (tauri.conf.json); show it unless started with Windows.
+            if !std::env::args().any(|a| a == tray::MINIMIZED_ARG) {
+                tray::show_main_window(app.handle());
+            }
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 match discord_rpc_auto_reconnect(handle).await {
@@ -858,7 +883,17 @@ pub fn run() {
             });
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Closing the window keeps d-scribe running in the tray.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            exit_app,
             run_ai_command,
             get_app_data_dir,
             get_log_file_path,

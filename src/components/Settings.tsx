@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { load } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { AiSettings } from "./AiSettings";
 import { EngineSettings } from "./EngineSettings";
 import { AudioSettings } from "./AudioSettings";
@@ -64,6 +65,7 @@ export function Settings() {
   const [segmentMergeBufferMs, setSegmentMergeBufferMs] = useState(1000);
   const [recentRetentionDays, setRecentRetentionDays] = useState(10);
   const [autoRecord, setAutoRecord] = useState(false);
+  const [startWithWindows, setStartWithWindows] = useState(false);
   const [recentMaxGb, setRecentMaxGb] = useState(20);
   const [nameTemplate, setNameTemplate] = useState("");
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
@@ -144,6 +146,7 @@ export function Settings() {
       setSegmentMergeBufferMs(buffer ?? 1000);
       setRecentRetentionDays(retention ?? 10);
       setAutoRecord((await store.get<boolean>("auto_record")) ?? false);
+      setStartWithWindows(await isAutostartEnabled().catch(() => false));
       setRecentMaxGb((await store.get<number>("recent_max_gb")) ?? 20);
       setNameTemplate((await store.get<string>("project_name_template")) ?? "");
 
@@ -463,6 +466,29 @@ export function Settings() {
                 <span className="field-hint">
                   Starts recording when you are in a voice channel or call with at least one other person. Stops
                   when you leave or are alone for a minute. Needs Discord connected.
+                </span>
+              </div>
+              <div className="form-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={startWithWindows}
+                    onChange={async (e) => {
+                      const on = e.target.checked;
+                      try {
+                        await (on ? enableAutostart() : disableAutostart());
+                        setStartWithWindows(on);
+                      } catch (err) {
+                        setStatus(`Could not change start with Windows: ${err}`);
+                      }
+                    }}
+                  />
+                  Start with Windows
+                </label>
+                <span className="field-hint">
+                  Starts d-scribe in the tray when you log in, so automatic recording works without opening it.
+                  Closing the window also keeps d-scribe in the tray; use Quit in the tray menu to stop it.
+                  Saved right away.
                 </span>
               </div>
             </div>
