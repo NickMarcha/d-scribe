@@ -86,4 +86,5 @@ Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording**
 | `src/components/AiPanel.tsx`, `aiConfig.ts`, `src-tauri/src/ai.rs` | AI prompts: runs the user's CLI command (default `claude -p --tools ""`) with prompt + transcript on stdin; results saved in `ai_outputs` on the project. No provider-specific code |
 | `src/components/Settings.tsx` | Settings UI, remote sources, model registry, slot dropdowns |
 | `src-tauri/src/transcription/engine.rs` | whisper.cpp engine download (`download_engine`) and `WhisperServer` |
+| `src/tasks.ts`, `src/components/TaskBar.tsx` | Long jobs (transcribe, model/engine downloads) go through `runTask`, which maps backend progress events to the bar fixed at the bottom of the window. State lives outside React so it survives tab switches |
 | `src/components/EngineSettings.tsx` | CPU/GPU engine download in Settings > Manage models |

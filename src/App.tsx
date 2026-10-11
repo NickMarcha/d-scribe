@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Settings } from "./components/Settings";
 import { Session } from "./components/Session";
 import { UpdateCheck, UpdateNotice, useUpdater } from "./components/UpdateNotice";
+import { TaskBar } from "./components/TaskBar";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import "./App.css";
@@ -168,6 +169,7 @@ function App() {
           </>
         )}
       </div>
+      <TaskBar />
     </div>
   );
 }

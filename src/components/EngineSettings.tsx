@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { runTask, bytesProgress, useTasks } from "../tasks";
 
 interface EngineStatus {
   cpu: boolean;
@@ -11,8 +11,8 @@ interface EngineStatus {
 /** Downloads the whisper.cpp engine. The GPU build is used whenever it is installed. */
 export function EngineSettings() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
-  const [downloading, setDownloading] = useState<"cpu" | "cuda" | null>(null);
-  const [progress, setProgress] = useState<{ bytes: number; total: number | null } | null>(null);
+  const tasks = useTasks();
+  const downloading = (["cpu", "cuda"] as const).find((k) => tasks.some((t) => t.id === `engine:${k}`)) ?? null;
   const [error, setError] = useState("");
 
   function refresh() {
@@ -21,25 +21,18 @@ export function EngineSettings() {
 
   useEffect(refresh, []);
 
-  useEffect(() => {
-    const unlisten = listen<{ bytesDownloaded: number; totalBytes: number | null }>("engine-download-progress", (e) =>
-      setProgress({ bytes: e.payload.bytesDownloaded, total: e.payload.totalBytes }),
-    );
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
   async function download(kind: "cpu" | "cuda") {
-    setDownloading(kind);
-    setProgress(null);
     setError("");
     try {
-      await invoke("download_engine_command", { kind });
+      await runTask(
+        `engine:${kind}`,
+        kind === "cuda" ? "Downloading the GPU engine" : "Downloading the CPU engine",
+        [{ event: "engine-download-progress", map: (p) => (p.kind === kind ? bytesProgress(p) : null) }],
+        () => invoke("download_engine_command", { kind }),
+      );
     } catch (e) {
       setError(`Download failed: ${e}`);
     }
-    setDownloading(null);
     refresh();
   }
 
@@ -81,20 +74,6 @@ export function EngineSettings() {
       </div>
       {!engine.nvidia && !engine.cuda && (
         <span className="field-hint">No NVIDIA driver found, so only the CPU engine is available.</span>
-      )}
-      {downloading && progress && (
-        <div className="download-progress-wrap">
-          <div className="download-progress-bar">
-            <div
-              className="download-progress-fill"
-              style={{ width: progress.total ? `${(progress.bytes / progress.total) * 100}%` : "0%" }}
-            />
-          </div>
-          <span className="download-progress-text">
-            {Math.round(progress.bytes / 1024 / 1024)} MB
-            {progress.total ? ` of ${Math.round(progress.total / 1024 / 1024)} MB` : ""}
-          </span>
-        </div>
       )}
       {error && <span className="field-hint" style={{ color: "var(--danger)" }}>{error}</span>}
     </div>

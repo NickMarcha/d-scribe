@@ -8,6 +8,7 @@ import { PlaybackBar } from "./PlaybackBar";
 import { Transcript, type Speaker } from "./Transcript";
 import { setText, type TranscriptData } from "./transcriptOps";
 import { AiPanel } from "./AiPanel";
+import { runTask, bytesProgress } from "../tasks";
 import { RecordingsOverview, placeLabel, type ProjectMeta } from "./RecordingsOverview";
 import type { AiOutput } from "./aiConfig";
 import "./Session.css";
@@ -515,25 +516,6 @@ export function Session() {
   }, [session, currentProjectPath]);
 
   const [transcribing, setTranscribing] = useState(false);
-  const [transcribeProgress, setTranscribeProgress] = useState<{ done: number; total: number } | null>(null);
-  const [engineDownload, setEngineDownload] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!transcribing) return;
-    const unlisteners = [
-      listen<{ done: number; total: number }>("transcribe-progress", (e) => {
-        setEngineDownload(null);
-        setTranscribeProgress(e.payload);
-      }),
-      listen<{ bytesDownloaded: number; totalBytes: number | null }>("engine-download-progress", (e) => {
-        const { bytesDownloaded, totalBytes } = e.payload;
-        setEngineDownload(totalBytes ? Math.round((bytesDownloaded / totalBytes) * 100) : 0);
-      }),
-    ];
-    return () => {
-      unlisteners.forEach((u) => u.then((fn) => fn()));
-    };
-  }, [transcribing]);
 
   /** Runs transcription with `modelId`. Returns the new texts, or null if it couldn't start or failed. */
   async function runTranscription(
@@ -591,10 +573,22 @@ export function Session() {
     if (!session) return;
     setTranscribing(true);
     setStatus("");
-    setTranscribeProgress(null);
-    const texts = await runTranscription(getRegularModelId(), undefined, selectedSlot?.englishModel);
+    const texts = await runTask(
+      "transcribe",
+      "Loading the model",
+      [
+        {
+          event: "transcribe-progress",
+          map: (p) => ({ done: p.done, total: p.total, unit: "items", label: "Transcribing segments" }),
+        },
+        {
+      event: "engine-download-progress",
+      map: (p) => ({ ...bytesProgress(p), label: "Downloading the Whisper engine" }),
+    },
+      ],
+      () => runTranscription(getRegularModelId(), undefined, selectedSlot?.englishModel),
+    );
     setTranscribing(false);
-    setTranscribeProgress(null);
     if (texts) {
       applyEdit({ ...transcriptData(session), texts });
       setStatus("Transcription complete.");
@@ -611,9 +605,14 @@ export function Session() {
   }
 
   async function downloadModel(modelName: string) {
-    setStatus("Downloading model...");
+    setStatus("");
     try {
-      const path = await invoke<string>("download_model_command", { modelName });
+      const path = await runTask(
+        `model:${modelName}`,
+        `Downloading ${modelName}`,
+        [{ event: "download-progress", map: (p) => (p.modelName === modelName ? bytesProgress(p) : null) }],
+        () => invoke<string>("download_model_command", { modelName }),
+      );
       setStatus(`Model downloaded to ${path}`);
     } catch (e) {
       const msg = String(e);
@@ -1002,13 +1001,7 @@ export function Session() {
                 })()
               }
             >
-              {!transcribing
-                ? "Transcribe"
-                : engineDownload != null
-                  ? `Downloading engine ${engineDownload}%`
-                  : transcribeProgress
-                    ? `Transcribing ${transcribeProgress.done} of ${transcribeProgress.total}`
-                    : "Loading model..."}
+              {transcribing ? "Transcribing..." : "Transcribe"}
             </button>
           </div>
 

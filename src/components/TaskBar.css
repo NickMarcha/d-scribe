@@ -1,0 +1,67 @@
+.task-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) 1fr auto;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 16px;
+  font-size: 13px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+/* Keep the end of the page reachable above the bar. */
+.app:has(.task-bar) .tab-content {
+  padding-bottom: 72px;
+}
+
+/* Rows share the bar's grid so all tracks line up. */
+.task-row {
+  display: contents;
+}
+
+.task-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-track {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.task-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.task-fill--indeterminate {
+  width: 30%;
+  animation: task-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes task-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+
+.task-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 150px;
+  text-align: right;
+}

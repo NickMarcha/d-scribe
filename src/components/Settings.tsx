@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { load } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { AiSettings } from "./AiSettings";
 import { EngineSettings } from "./EngineSettings";
+import { runTask, bytesProgress, useTasks } from "../tasks";
 import "./Settings.css";
 
 const STORE_PATH = "settings.json";
@@ -28,13 +28,6 @@ interface LanguageSlot {
   regularModel: string;
   /** Optional: turns this model detects as English are kept as English; the rest use regularModel. */
   englishModel?: string;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 const DEFAULT_LANGUAGE_SLOTS: LanguageSlot[] = [
@@ -86,8 +79,7 @@ export function Settings() {
   const [addRemoteModel, setAddRemoteModel] = useState("");
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
-  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<{ bytes: number; total: number | null } | null>(null);
+  const downloadingModel = useTasks().find((t) => t.id.startsWith("model:"))?.id.slice("model:".length) ?? null;
   const [modelsDir, setModelsDir] = useState<string | null>(null);
 
   const [recordingExpanded, setRecordingExpanded] = useState(false);
@@ -104,22 +96,6 @@ export function Settings() {
     invoke<string>("get_models_dir").then(setModelsDir).catch(() => setModelsDir(null));
   }, []);
 
-  useEffect(() => {
-    const unlisten = listen<{ modelName: string; bytesDownloaded: number; totalBytes: number | null }>(
-      "download-progress",
-      (evt) => {
-        if (downloadingModel === evt.payload.modelName) {
-          setDownloadProgress({
-            bytes: evt.payload.bytesDownloaded,
-            total: evt.payload.totalBytes ?? null,
-          });
-        }
-      }
-    );
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [downloadingModel]);
 
   async function refreshInstalledModels() {
     try {
@@ -239,19 +215,19 @@ export function Settings() {
   }
 
   async function downloadIntegratedModel(modelName: string) {
-    setDownloadingModel(modelName);
-    setDownloadProgress({ bytes: 0, total: null });
-    setStatus(`Downloading ${modelName}...`);
+    setStatus("");
     try {
-      await invoke<string>("download_model_command", { modelName });
+      await runTask(
+        `model:${modelName}`,
+        `Downloading ${modelName}`,
+        [{ event: "download-progress", map: (p) => (p.modelName === modelName ? bytesProgress(p) : null) }],
+        () => invoke<string>("download_model_command", { modelName }),
+      );
       await refreshInstalledModels();
       setStatus(`Downloaded ${modelName}`);
     } catch (e) {
       const msg = String(e);
       setStatus(msg.includes("coming soon") ? "large-v3-turbo: coming soon" : `Download failed: ${msg}`);
-    } finally {
-      setDownloadingModel(null);
-      setDownloadProgress(null);
     }
   }
 
@@ -668,26 +644,6 @@ export function Settings() {
                             >
                               {downloadingModel === m.id ? "Downloading..." : "Download"}
                             </button>
-                            {downloadingModel === m.id && downloadProgress && (
-                              <div className="download-progress-wrap">
-                                <div className="download-progress-bar">
-                                  <div
-                                    className="download-progress-fill"
-                                    style={{
-                                      width: downloadProgress.total
-                                        ? `${Math.min(100, (downloadProgress.bytes / downloadProgress.total) * 100)}%`
-                                        : "50%",
-                                      animation: downloadProgress.total ? undefined : "download-indeterminate 1.2s ease-in-out infinite",
-                                    }}
-                                  />
-                                </div>
-                                <span className="download-progress-text">
-                                  {downloadProgress.total
-                                    ? `${formatBytes(downloadProgress.bytes)} / ${formatBytes(downloadProgress.total)}`
-                                    : `${formatBytes(downloadProgress.bytes)}`}
-                                </span>
-                              </div>
-                            )}
                           </>
                         )}
                       </span>
