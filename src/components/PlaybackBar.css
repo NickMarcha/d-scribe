@@ -1,46 +1,22 @@
 .playback-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
-  margin-top: 16px;
-  padding: 8px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.playback-bar-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 12px;
 }
 
-.playback-bar-buttons {
-  display: flex;
-  gap: 8px;
+.playback-toggle {
+  min-width: 72px;
 }
 
-.playback-bar-time {
+.playback-seek {
+  flex: 1;
+  min-width: 80px;
+  accent-color: var(--accent);
+}
+
+.playback-time {
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 13px;
-}
-
-.playback-bar-expand {
-  margin-left: auto;
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.playback-bar-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: center;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
+  white-space: nowrap;
 }

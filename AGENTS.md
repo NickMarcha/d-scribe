@@ -81,8 +81,9 @@ Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording**
 | `src-tauri/src/transcription/wav_extract.rs` | `extract_segment` |
 | `src-tauri/src/transcription/remote_api.rs` | `transcribe_via_api`, `list_models` (OpenAI-compatible API) |
 | `src-tauri/src/session/recorder.rs` | Segments, merge buffer, speaking events |
-| `src/components/Session.tsx` | Main UI, project list, playback, delete modal |
-| `src/components/Transcript.tsx` | Reader (grouped by speaker, search, click to seek) and editor (speaker, split, merge, delete, re-transcribe one segment). Edit ops live in `transcriptOps.ts`; undo history and auto-save in `Session.tsx` |
+| `src/components/Session.tsx` | Main UI. An open recording has a sticky `.session-head` (back link, title, language, Transcribe, Save, More menu with export/delete, and `PlaybackBar` with seek slider). Its height goes in `--session-head-h` so the transcript toolbar sticks right under it. The transcript scrolls with the page (no inner scroll) |
+| `src/components/Menu.tsx` | Small dropdown (More, Audio) |
+| `src/components/Transcript.tsx` | Tabs: Read, Edit, plus `extraViews` (Stats, AI). Reader hides empty segments once anything has text and starts a new paragraph after `PARAGRAPH_GAP_MS`; search, click to seek. Editor (speaker, split, merge, delete, re-transcribe one segment). Edit ops live in `transcriptOps.ts`; undo history and auto-save in `Session.tsx` |
 | `src/components/AiPanel.tsx`, `aiConfig.ts`, `src-tauri/src/ai.rs` | AI prompts: runs the user's CLI command (default `claude -p --tools ""`) with prompt + transcript on stdin; results saved in `ai_outputs` on the project. No provider-specific code |
 | `src/components/Settings.tsx` | Settings UI, remote sources, model registry, slot dropdowns |
 | `src-tauri/src/transcription/engine.rs` | whisper.cpp engine download (`download_engine`) and `WhisperServer` |

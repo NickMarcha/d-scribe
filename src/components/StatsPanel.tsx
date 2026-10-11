@@ -65,7 +65,7 @@ interface StatsPanelProps {
   segments: SessionSegment[];
   texts: string[];
   collapsed: boolean;
-  onToggleCollapsed: () => void;
+  onToggleCollapsed?: () => void;
 }
 
 export function StatsPanel({ segments, texts, collapsed, onToggleCollapsed }: StatsPanelProps) {
@@ -138,9 +138,11 @@ export function StatsPanel({ segments, texts, collapsed, onToggleCollapsed }: St
 
   return (
     <div className={`stats-panel ${collapsed ? "stats-panel-collapsed" : ""}`}>
-      <button type="button" className="stats-panel-toggle" onClick={onToggleCollapsed}>
-        {collapsed ? "Stats" : "Hide stats"}
-      </button>
+      {onToggleCollapsed && (
+        <button type="button" className="stats-panel-toggle" onClick={onToggleCollapsed}>
+          {collapsed ? "Stats" : "Hide stats"}
+        </button>
+      )}
       {!collapsed && (
         <div className="stats-panel-content">
           <div className="stats-summary">

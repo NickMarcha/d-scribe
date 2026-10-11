@@ -8,6 +8,7 @@ import { PlaybackBar } from "./PlaybackBar";
 import { Transcript, type Speaker } from "./Transcript";
 import { setText, type TranscriptData } from "./transcriptOps";
 import { AiPanel } from "./AiPanel";
+import { Menu } from "./Menu";
 import { runTask, bytesProgress } from "../tasks";
 import { RecordingsOverview, placeLabel, type ProjectMeta } from "./RecordingsOverview";
 import type { AiOutput } from "./aiConfig";
@@ -74,7 +75,8 @@ export function Session() {
   const [activeSegmentIndex, setActiveSegmentIndex] = useState<number | null>(null);
   const [liveSegments, setLiveSegments] = useState<SessionSegment[]>([]);
   const [liveTexts, setLiveTexts] = useState<string[]>([]);
-  const [statsCollapsed, setStatsCollapsed] = useState(true);
+  const headRef = useRef<HTMLDivElement>(null);
+  const [headHeight, setHeadHeight] = useState(0);
   const [playbackCurrentTime, setPlaybackCurrentTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [languageSlots, setLanguageSlots] = useState<LanguageSlot[]>(DEFAULT_LANGUAGE_SLOTS);
@@ -716,19 +718,45 @@ export function Session() {
     [segments, session?.audio_paths, playAudio]
   );
 
+  const seekToTime = useCallback(
+    (seconds: number) => {
+      const sources: [HTMLAudioElement | null, string | null | undefined][] = [
+        [audioRemoteRef.current, session?.audio_paths?.loopback],
+        [audioLocalRef.current, session?.audio_paths?.microphone],
+      ];
+      for (const [audio, path] of sources) {
+        if (audio && path) {
+          loadSource(audio, path);
+          audio.currentTime = seconds;
+        }
+      }
+      setPlaybackCurrentTime(seconds);
+      const ms = seconds * 1000;
+      const index = segments.findIndex((seg) => seg.start_ms <= ms && ms < seg.end_ms);
+      if (index >= 0) setActiveSegmentIndex(index);
+    },
+    [segments, session?.audio_paths],
+  );
+
+  // Load the audio up front so the seek slider knows the length before the first Play.
+  useEffect(() => {
+    if (audioRemoteRef.current && session?.audio_paths?.loopback) loadSource(audioRemoteRef.current, session.audio_paths.loopback);
+    if (audioLocalRef.current && session?.audio_paths?.microphone) loadSource(audioLocalRef.current, session.audio_paths.microphone);
+  }, [session?.audio_paths?.loopback, session?.audio_paths?.microphone]);
+
+  // The transcript toolbar sticks just under the session header, so it needs its height.
+  useEffect(() => {
+    const el = headRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setHeadHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [session != null, recording]);
+
   const pauseAudio = useCallback(() => {
     audioRemoteRef.current?.pause();
     audioLocalRef.current?.pause();
     setIsPlaying(false);
-  }, []);
-
-  const stopAudio = useCallback(() => {
-    audioRemoteRef.current?.pause();
-    audioLocalRef.current?.pause();
-    if (audioRemoteRef.current) audioRemoteRef.current.currentTime = 0;
-    if (audioLocalRef.current) audioLocalRef.current.currentTime = 0;
-    setIsPlaying(false);
-    setActiveSegmentIndex(null);
   }, []);
 
   const handleTimeUpdate = useCallback(() => {
@@ -815,9 +843,14 @@ export function Session() {
     return [...map].map(([id, name]) => ({ id, name }));
   })();
 
+  const canTranscribe = !(() => {
+    const modelType = getModelType(getRegularModelId());
+    return modelType === "remote" && !resolveRemoteConfig(getRegularModelId());
+  })();
+
   return (
-    <div className="session">
-      <h2>{session || recording ? "Session" : "Recordings"}</h2>
+    <div className="session" style={{ ["--session-head-h" as string]: `${headHeight}px` }}>
+      {!recording && !session && <h2>Recordings</h2>}
 
       {!recording && !session && (
         <div className="session-idle">
@@ -875,179 +908,179 @@ export function Session() {
         </div>
       )}
 
-      {recording && (
-        <div className="session-recording">
-          <p className="recording-indicator">● Recording</p>
-          <button type="button" className="stop-btn" onClick={stopRecording}>
-            Stop recording
-          </button>
+      {(session || recording) && (
+        <div className="session-head" ref={headRef}>
+          <div className="session-head-row">
+            {recording ? (
+              <>
+                <span className="recording-indicator">● Recording</span>
+                <span className="session-title">Live transcript</span>
+                <div className="session-head-actions">
+                  <button type="button" className="stop-btn" onClick={stopRecording}>
+                    Stop recording
+                  </button>
+                </div>
+              </>
+            ) : (
+              session && (
+                <>
+                  <button type="button" className="link-button" onClick={backToRecordings}>
+                    Recordings
+                  </button>
+                  <span className="session-title" title={session.session_id}>
+                    {placeLabel({ guild_name: session.guild_name, channel_name: session.channel_name, channel_type: session.channel_type ?? null })}
+                    <span className="session-date">{new Date(session.created_at * 1000).toLocaleString()}</span>
+                    {session.live_mode_enabled && <span className="meta-badge">Live</span>}
+                  </span>
+                  <div className="session-head-actions">
+                    <select
+                      value={selectedLanguageId}
+                      onChange={(e) => setSelectedLanguageId(e.target.value)}
+                      aria-label="Language"
+                      title="Language to transcribe in"
+                    >
+                      {languageSlots.map((slot) => (
+                        <option key={slot.id} value={slot.id}>
+                          {slot.label}
+                        </option>
+                      ))}
+                    </select>
+                    {missingModel ? (
+                      <button type="button" onClick={() => downloadModel(missingModel)} disabled={transcribing}>
+                        Download {missingModel}
+                      </button>
+                    ) : (
+                      <button type="button" onClick={transcribeSession} disabled={transcribing || !canTranscribe}>
+                        {transcribing ? "Transcribing..." : "Transcribe"}
+                      </button>
+                    )}
+                    {currentProjectPath && (
+                      <button
+                        type="button"
+                        className={isSaved ? "active" : ""}
+                        onClick={() => setSaved(currentProjectPath, !isSaved)}
+                        title={isSaved ? "Saved. Click to unsave, so it gets deleted like other unsaved recordings." : "Keep this recording until you delete it"}
+                      >
+                        {isSaved ? "Saved" : "Save"}
+                      </button>
+                    )}
+                    <Menu label="More" title="Export and delete">
+                      {(close) => (
+                        <>
+                          <button type="button" onClick={() => { close(); exportTranscript("srt"); }}>
+                            Export SRT subtitles
+                          </button>
+                          <button type="button" onClick={() => { close(); exportTranscript("vtt"); }}>
+                            Export VTT subtitles
+                          </button>
+                          {currentProjectPath && (
+                            <>
+                              <div className="menu-separator" />
+                              <button
+                                type="button"
+                                className="menu-danger"
+                                onClick={() => {
+                                  close();
+                                  setDeleteTarget(currentProjectPath);
+                                  setDeleteAudio(false);
+                                }}
+                              >
+                                Delete recording
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </Menu>
+                  </div>
+                </>
+              )
+            )}
+          </div>
+          {session && !recording && (
+            <PlaybackBar
+              isPlaying={isPlaying}
+              onPlay={() => playAudio()}
+              onPause={pauseAudio}
+              onSeekTime={seekToTime}
+              playbackMode={playbackMode}
+              setPlaybackModeAndPlay={setPlaybackModeAndPlay}
+              remoteVolume={remoteVolume}
+              setRemoteVolume={setRemoteVolume}
+              localVolume={localVolume}
+              setLocalVolume={setLocalVolume}
+              currentTime={playbackCurrentTime}
+              duration={playbackDuration}
+              hasAudio={!!(session.audio_paths?.loopback || session.audio_paths?.microphone)}
+            />
+          )}
+          {status && <p className="session-status">{status}</p>}
         </div>
       )}
 
+      {session && (
+        <>
+          <audio
+            ref={audioRemoteRef}
+            preload="metadata"
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={handleLoadedMetadata}
+            onEnded={() => {
+              if (playbackMode === "both") pauseAudio();
+              else setIsPlaying(false);
+            }}
+          />
+          <audio
+            ref={audioLocalRef}
+            preload="metadata"
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={handleLoadedMetadata}
+            onEnded={() => {
+              if (playbackMode === "both") pauseAudio();
+              else setIsPlaying(false);
+            }}
+          />
+        </>
+      )}
+
       {(session || recording) && (
-        <div className="session-transcript">
-          <div className="session-two-column">
-            {session && (
-              <StatsPanel
-                segments={segments}
-                texts={texts}
-                collapsed={statsCollapsed}
-                onToggleCollapsed={() => setStatsCollapsed(!statsCollapsed)}
-              />
-            )}
-            <div className="transcript-scroll-column">
-          <div className="transcript-meta">
-            {session && !recording && (
-              <button type="button" className="link-button back-link" onClick={backToRecordings}>
-                Back to recordings
-              </button>
-            )}
-            <span>
-              {recording || !session
-                ? "Live recording"
-                : `${placeLabel({ guild_name: session.guild_name, channel_name: session.channel_name, channel_type: session.channel_type ?? null })}, ${new Date(session.created_at * 1000).toLocaleString()}`}
-              {session?.live_mode_enabled && (
-                <span className="meta-badge">Live</span>
-              )}
-            </span>
-          </div>
-
-          {session && (
-          <PlaybackBar
-            isPlaying={isPlaying}
-            onPlay={() => playAudio()}
-            onPause={pauseAudio}
-            onStop={stopAudio}
-            playbackMode={playbackMode}
-            setPlaybackModeAndPlay={setPlaybackModeAndPlay}
-            remoteVolume={remoteVolume}
-            setRemoteVolume={setRemoteVolume}
-            localVolume={localVolume}
-            setLocalVolume={setLocalVolume}
-            currentTime={playbackCurrentTime}
-            duration={playbackDuration}
-            hasAudio={!!(session.audio_paths?.loopback || session.audio_paths?.microphone)}
-          />
-          )}
-
-          {session && (
-            <>
-              <audio
-                ref={audioRemoteRef}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleLoadedMetadata}
-                onEnded={() => {
-                  if (playbackMode === "both") pauseAudio();
-                  else setIsPlaying(false);
-                }}
-              />
-              <audio
-                ref={audioLocalRef}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleLoadedMetadata}
-                onEnded={() => {
-                  if (playbackMode === "both") pauseAudio();
-                  else setIsPlaying(false);
-                }}
-              />
-            </>
-          )}
-          {session && !recording && (
-            <AiPanel
-              key={session.session_id}
-              data={transcriptData(session)}
-              outputs={session.ai_outputs ?? []}
-              onAdd={(output) => updateAiOutputs((list) => [...list, output])}
-              onDelete={(index) => updateAiOutputs((list) => list.filter((_, i) => i !== index))}
-            />
-          )}
-          <Transcript
-            data={recording || !session ? { segments: liveSegments, texts: liveTexts } : transcriptData(session)}
-            activeIndex={activeSegmentIndex}
-            editable={!recording && !!session}
-            speakers={speakers}
-            onSeek={seekTo}
-            onEdit={applyEdit}
-            canUndo={historySize.past > 0}
-            canRedo={historySize.future > 0}
-            onUndo={undo}
-            onRedo={redo}
-            models={modelRegistry.map((m) => ({ id: m.id, label: m.id }))}
-            retranscribeModelId={retranscribeModelId || getRegularModelId()}
-            onRetranscribeModelChange={setRetranscribeModelId}
-            onRetranscribe={retranscribeSegment}
-            retranscribingIndex={retranscribingIndex}
-          />
-            </div>
-          </div>
-
-          {session && (
-            <>
-          <div className="transcribe-section">
-            <select
-              value={selectedLanguageId}
-              onChange={(e) => setSelectedLanguageId(e.target.value)}
-              className="language-select"
-            >
-              {languageSlots.map((slot) => (
-                <option key={slot.id} value={slot.id}>
-                  {slot.label}
-                </option>
-              ))}
-            </select>
-            {missingModel && (
-              <button type="button" onClick={() => downloadModel(missingModel)} disabled={transcribing}>
-                Download {missingModel}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={transcribeSession}
-              disabled={
-                transcribing ||
-                (() => {
-                  const modelId = getRegularModelId();
-                  const modelType = getModelType(modelId);
-                  return modelType === "remote" && !resolveRemoteConfig(modelId);
-                })()
-              }
-            >
-              {transcribing ? "Transcribing..." : "Transcribe"}
-            </button>
-          </div>
-
-          <div className="session-actions">
-            {currentProjectPath && (
-              <button
-                type="button"
-                onClick={() => setSaved(currentProjectPath, !isSaved)}
-                title={isSaved ? "Saved. Click to unsave, so it gets deleted like other unsaved recordings." : "Keep this recording until you delete it"}
-              >
-                {isSaved ? "Saved" : "Save"}
-              </button>
-            )}
-            {currentProjectPath && (
-              <button
-                type="button"
-                className="delete-btn"
-                onClick={() => {
-                  setDeleteTarget(currentProjectPath);
-                  setDeleteAudio(false);
-                }}
-              >
-                Delete
-              </button>
-            )}
-            <button type="button" onClick={() => exportTranscript("srt")}>
-              Export SRT
-            </button>
-            <button type="button" onClick={() => exportTranscript("vtt")}>
-              Export VTT
-            </button>
-          </div>
-            </>
-          )}
-        </div>
+        <Transcript
+          data={recording || !session ? { segments: liveSegments, texts: liveTexts } : transcriptData(session)}
+          activeIndex={activeSegmentIndex}
+          editable={!recording && !!session}
+          speakers={speakers}
+          onSeek={seekTo}
+          onEdit={applyEdit}
+          canUndo={historySize.past > 0}
+          canRedo={historySize.future > 0}
+          onUndo={undo}
+          onRedo={redo}
+          models={modelRegistry.map((m) => ({ id: m.id, label: m.id }))}
+          retranscribeModelId={retranscribeModelId || getRegularModelId()}
+          onRetranscribeModelChange={setRetranscribeModelId}
+          onRetranscribe={retranscribeSegment}
+          retranscribingIndex={retranscribingIndex}
+          extraViews={
+            session && !recording
+              ? [
+                  { id: "stats", label: "Stats", render: () => <StatsPanel segments={segments} texts={texts} collapsed={false} /> },
+                  {
+                    id: "ai",
+                    label: "AI",
+                    render: () => (
+                      <AiPanel
+                        key={session.session_id}
+                        data={transcriptData(session)}
+                        outputs={session.ai_outputs ?? []}
+                        onAdd={(output) => updateAiOutputs((list) => [...list, output])}
+                        onDelete={(index) => updateAiOutputs((list) => list.filter((_, i) => i !== index))}
+                      />
+                    ),
+                  },
+                ]
+              : undefined
+          }
+        />
       )}
 
       {deleteTarget && (
@@ -1074,7 +1107,7 @@ export function Session() {
         </div>
       )}
 
-      {status && <p className="status">{status}</p>}
+      {status && !session && !recording && <p className="status">{status}</p>}
     </div>
   );
 }

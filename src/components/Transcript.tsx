@@ -34,13 +34,16 @@ interface TranscriptProps {
   onRetranscribeModelChange: (id: string) => void;
   onRetranscribe: (index: number) => void;
   retranscribingIndex: number | null;
+  /** More tabs after Read and Edit (e.g. Stats, AI). Only shown when editable. */
+  extraViews?: { id: string; label: string; render: () => ReactNode }[];
 }
 
 export function Transcript(props: TranscriptProps) {
   const { data, activeIndex, editable } = props;
-  const [mode, setMode] = useState<"read" | "edit">("read");
+  const [mode, setMode] = useState<string>("read");
   const [query, setQuery] = useState("");
   const view = editable ? mode : "read";
+  const extra = props.extraViews?.find((v) => v.id === view);
   const rowRefs = useRef(new Map<number, HTMLElement>());
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -79,9 +82,14 @@ export function Transcript(props: TranscriptProps) {
             <button className={view === "edit" ? "active" : ""} onClick={() => setMode("edit")}>
               Edit
             </button>
+            {props.extraViews?.map((v) => (
+              <button key={v.id} className={view === v.id ? "active" : ""} onClick={() => setMode(v.id)}>
+                {v.label}
+              </button>
+            ))}
           </div>
         )}
-        {view === "read" ? (
+        {extra ? null : view === "read" ? (
           <ReaderSearch data={data} rowRefs={rowRefs} query={query} setQuery={setQuery} />
         ) : (
           <div className="transcript-tools">
@@ -108,8 +116,11 @@ export function Transcript(props: TranscriptProps) {
       </div>
 
       <div className="transcript-body" ref={bodyRef}>
-        {data.segments.length === 0 && <p className="transcript-empty">No segments yet.</p>}
-        {view === "read" ? (
+        {extra ? (
+          <div className="transcript-extra">{extra.render()}</div>
+        ) : data.segments.length === 0 ? (
+          <p className="transcript-empty">No segments yet.</p>
+        ) : view === "read" ? (
           <Reader data={data} activeIndex={activeIndex} onSeek={props.onSeek} setRowRef={setRowRef} query={query.trim()} />
         ) : (
           <Editor {...props} setRowRef={setRowRef} />
@@ -187,6 +198,9 @@ function highlight(text: string, query: string): ReactNode {
   return parts;
 }
 
+/** In the reader, a pause longer than this starts a new paragraph. */
+const PARAGRAPH_GAP_MS = 20_000;
+
 function Reader({
   data,
   activeIndex,
@@ -200,9 +214,27 @@ function Reader({
   setRowRef: (i: number) => (el: HTMLElement | null) => void;
   query: string;
 }) {
-  const blocks = useMemo(() => groupBlocks(data.segments), [data.segments]);
+  // Once there is text, leave out segments without any (silence, noise), so the same speaker's
+  // lines join up. Before transcription, show each turn once.
+  const hasText = data.texts.some((t) => t?.trim());
+  const blocks = useMemo(() => {
+    const keep = data.segments.map((_, i) => i).filter((i) => !hasText || (data.texts[i] ?? "").trim());
+    const grouped = groupBlocks(keep.map((i) => data.segments[i])).map((b) => ({ ...b, indices: b.indices.map((j) => keep[j]) }));
+    // Start a new paragraph after a long pause, so a speaker's lines don't run together for minutes.
+    return grouped.flatMap((b) => {
+      const parts = [{ ...b, indices: [b.indices[0]] }];
+      for (const i of b.indices.slice(1)) {
+        const last = parts[parts.length - 1];
+        const prev = data.segments[last.indices[last.indices.length - 1]];
+        if (data.segments[i].start_ms - prev.end_ms > PARAGRAPH_GAP_MS) parts.push({ ...b, startMs: data.segments[i].start_ms, indices: [i] });
+        else last.indices.push(i);
+      }
+      return parts;
+    });
+  }, [data.segments, data.texts, hasText]);
   return (
     <>
+      {!hasText && <p className="transcript-empty">Not transcribed yet. Pick a language and click Transcribe.</p>}
       {blocks.map((block) => (
         <section key={block.indices[0]} className="reader-block">
           <div className="reader-meta">
@@ -210,7 +242,12 @@ function Reader({
             <span className="reader-time">{formatMs(block.startMs)}</span>
           </div>
           <p className="reader-text">
-            {block.indices.map((i) => {
+            {!hasText && (
+              <span ref={setRowRef(block.indices[0])} className="reader-seg empty" onClick={() => onSeek(block.indices[0])}>
+                {formatMs(block.indices.reduce((sum, i) => sum + data.segments[i].end_ms - data.segments[i].start_ms, 0))} of speech
+              </span>
+            )}
+            {hasText && block.indices.map((i) => {
               const text = (data.texts[i] ?? "").trim();
               return (
                 <span
@@ -220,7 +257,7 @@ function Reader({
                   onClick={() => onSeek(i)}
                   title={`${formatMs(data.segments[i].start_ms)} to ${formatMs(data.segments[i].end_ms)}`}
                 >
-                  {text ? highlight(text, query) : "(no text)"}{" "}
+                  {highlight(text, query)}{" "}
                 </span>
               );
             })}

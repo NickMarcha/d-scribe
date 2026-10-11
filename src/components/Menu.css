@@ -1,0 +1,63 @@
+.menu {
+  position: relative;
+}
+
+.menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 50;
+  min-width: 180px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.menu-panel--right {
+  right: 0;
+}
+
+.menu-panel--left {
+  left: 0;
+}
+
+/* Plain rows for actions. */
+.menu-panel > button {
+  justify-content: flex-start;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 400;
+}
+
+.menu-panel > button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+}
+
+.menu-panel > button.menu-danger {
+  color: var(--danger);
+}
+
+.menu-panel > button.menu-danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+/* Form rows (sliders, selects). */
+.menu-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  font-size: 13px;
+}

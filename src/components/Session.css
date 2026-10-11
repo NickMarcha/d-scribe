@@ -11,7 +11,6 @@
 .recording-indicator {
   color: var(--danger);
   font-weight: 600;
-  margin-bottom: 8px;
 }
 
 .stop-btn,
@@ -36,36 +35,53 @@
   border-color: var(--danger);
 }
 
-.session-two-column {
+/* Title, actions and player for an open recording. Sticks under the app toolbar (48px). */
+.session-head {
+  position: sticky;
+  top: 48px;
+  z-index: 10;
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  margin: -24px -24px 16px;
+  padding: 12px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-head-row {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
-}
-
-.session-two-column .stats-panel {
-  align-self: flex-start;
-  margin-bottom: 0;
-}
-
-.session-two-column .stats-panel:not(.stats-panel-collapsed) {
-  align-self: stretch;
-}
-
-.transcript-scroll-column {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
 }
 
-.transcript-meta {
+.session-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-date {
+  margin-left: 8px;
+  font-weight: 400;
   color: var(--text-muted);
-  margin-bottom: 16px;
 }
 
-.transcript-meta .back-link {
-  display: block;
-  margin-bottom: 8px;
+.session-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.session-status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 .meta-badge {

@@ -72,8 +72,8 @@ d-scribe asks Discord for the `rpc` and `identify` scopes.
 
    To skip steps 3 and 4, turn on **Record automatically** in Settings > **Recording**. d-scribe then starts recording when you're in a voice channel or call with at least one other person, and stops when you leave or have been alone for a minute.
 5. Pick the language next to **Transcribe** and click it. Progress shows in a bar at the bottom of the window, so you can keep using the app meanwhile. Downloads show there too.
-6. Read the transcript in the **Read** view. Click a line to play from there. Fix speakers, split or merge segments and re-transcribe single lines in the **Edit** view. Edits save automatically.
-7. Click **Save** to keep the recording until you delete it, or **Export SRT** / **Export VTT** to get subtitle files.
+6. Read the transcript in the **Read** tab. Click a line to play from there, or drag the slider in the player at the top. Fix speakers, split or merge segments and re-transcribe single lines in the **Edit** tab. Edits save automatically. **Stats** and **AI** are tabs next to them.
+7. Click **Save** to keep the recording until you delete it. **More** has subtitle export (SRT, VTT) and Delete.
 
 ### 6. Summaries and notes (optional)
 

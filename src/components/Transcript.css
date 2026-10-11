@@ -7,7 +7,13 @@
   margin-bottom: 16px;
 }
 
+/* Sticks under the session header; --session-head-h is set by Session. */
 .transcript-toolbar {
+  position: sticky;
+  top: calc(48px + var(--session-head-h, 0px));
+  z-index: 5;
+  background: var(--surface);
+  border-radius: var(--radius) var(--radius) 0 0;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -81,10 +87,28 @@
   font-size: 13px;
 }
 
+/* No inner scroll: the transcript scrolls with the page. */
 .transcript-body {
-  max-height: 60vh;
   min-height: 200px;
-  overflow-y: auto;
+}
+
+/* Keep rows scrolled into view clear of the sticky header and the task bar. */
+.reader-seg,
+.editor-row {
+  scroll-margin-top: calc(48px + var(--session-head-h, 0px) + 56px);
+  scroll-margin-bottom: 80px;
+}
+
+.transcript-extra {
+  padding: 16px;
+}
+
+/* Panels shown as tabs don't need their own box. */
+.transcript-extra .stats-panel {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .transcript-empty {
