@@ -188,15 +188,36 @@ impl WhisperServer {
         if !status.is_success() || body.get("error").is_some() {
             return Err(format!("whisper-server: {}", body));
         }
-        let text = body["text"]
-            .as_str()
-            .unwrap_or_default()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let text = speech_text(&body);
         let english_prob = body["language_probabilities"]["en"].as_f64().unwrap_or(0.0) as f32;
         Ok(Inference { text, english_prob })
     }
+}
+
+/// Text of the parts whisper thinks are speech. Uses whisper's own rule for dropping a
+/// segment (no-speech probability > 0.6 with average log probability < -1) and removes special
+/// tokens such as NB-Whisper's `<|nocaptions|>`.
+fn speech_text(body: &serde_json::Value) -> String {
+    let parts: Vec<&str> = match body["segments"].as_array() {
+        Some(segs) => segs
+            .iter()
+            .filter(|s| {
+                let no_speech = s["no_speech_prob"].as_f64().unwrap_or(0.0);
+                let logprob = s["avg_logprob"].as_f64().unwrap_or(0.0);
+                !(no_speech > 0.6 && logprob < -1.0)
+            })
+            .filter_map(|s| s["text"].as_str())
+            .collect(),
+        None => vec![body["text"].as_str().unwrap_or_default()],
+    };
+    let mut text = parts.join(" ");
+    while let Some(start) = text.find("<|") {
+        match text[start..].find("|>") {
+            Some(end) => text.replace_range(start..start + end + 2, " "),
+            None => break,
+        }
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 impl Drop for WhisperServer {

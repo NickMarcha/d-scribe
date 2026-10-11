@@ -282,6 +282,9 @@ fn start_recording(
                     warn!("[live] extract returned empty for {}..{} ms (buffer may not have samples yet)", seg.start_ms, seg.end_ms);
                     continue;
                 }
+                if transcription::rms(&samples) < SILENCE_RMS {
+                    continue;
+                }
                 let temp_dir = match &temp_dir {
                     Some(d) => d.clone(),
                     None => {
@@ -529,6 +532,9 @@ async fn list_remote_models_command(
 
 /// Segments shorter than this are skipped: whisper mostly hallucinates on them.
 const MIN_SEGMENT_MS: u64 = 250;
+/// Segments quieter than this (RMS of 16-bit samples) are treated as silence and not sent to
+/// whisper, which invents text like "Thank you." for silent audio.
+const SILENCE_RMS: f32 = 100.0;
 /// With an English model set, turns it detects as English at least this confidently keep its text.
 const ENGLISH_THRESHOLD: f32 = 0.5;
 
@@ -674,7 +680,12 @@ async fn transcribe_session_command(
         let is_local = state.self_user_id.as_ref().map_or(false, |id| id == &seg.user_id);
         let source_path = if is_local { mic_path } else { loopback_path };
         let segment_path = temp_dir.join(format!("seg_{}.wav", i));
-        extract_segment(source_path, &segment_path, seg.start_ms, seg.end_ms)?;
+        let (level, samples) = extract_segment(source_path, &segment_path, seg.start_ms, seg.end_ms)?;
+        if samples < (MIN_SEGMENT_MS * 16) as usize || level < SILENCE_RMS {
+            let _ = std::fs::remove_file(&segment_path);
+            texts[i] = String::new();
+            continue;
+        }
 
         let result = if let Some(config) = &remote_config {
             transcribe_via_api(config, &segment_path).await
