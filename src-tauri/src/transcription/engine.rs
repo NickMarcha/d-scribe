@@ -1,7 +1,6 @@
 //! whisper.cpp engine: downloaded on demand into app data, run as a local server so the model
 //! is loaded once per transcription instead of once per segment.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -58,12 +57,10 @@ pub fn installed_engine(engines_root: &Path) -> Option<(EngineKind, PathBuf)> {
 }
 
 /// Downloads and unpacks an engine. Returns its directory.
-pub async fn download_engine<F>(engines_root: &Path, kind: EngineKind, mut on_progress: F) -> Result<PathBuf, String>
+pub async fn download_engine<F>(engines_root: &Path, kind: EngineKind, on_progress: F) -> Result<PathBuf, String>
 where
     F: FnMut(u64, Option<u64>) + Send,
 {
-    use futures_util::StreamExt;
-
     let dir = engine_dir(engines_root, kind);
     if is_installed(engines_root, kind) {
         return Ok(dir);
@@ -74,23 +71,8 @@ where
         RELEASE,
         kind.asset()
     );
-    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("Download failed ({}): {}", response.status(), url));
-    }
-    let total = response.content_length();
-    let zip_path = engines_root.join(format!("{}.zip.part", kind.dir_name()));
-    {
-        let mut file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
-        let mut stream = response.bytes_stream();
-        let mut downloaded = 0u64;
-        while let Some(chunk) = stream.next().await {
-            let bytes = chunk.map_err(|e| e.to_string())?;
-            file.write_all(&bytes).map_err(|e| e.to_string())?;
-            downloaded += bytes.len() as u64;
-            on_progress(downloaded, total);
-        }
-    }
+    let zip_path = engines_root.join(format!("{}.zip", kind.dir_name()));
+    super::download::download_to_file(&url, &zip_path, on_progress).await?;
 
     let tmp_dir = dir.with_extension("part");
     let _ = std::fs::remove_dir_all(&tmp_dir);

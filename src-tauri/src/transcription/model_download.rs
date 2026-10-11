@@ -1,6 +1,5 @@
 //! Download Whisper models from Hugging Face.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Model source: (model_id, hf_repo, hf_filename, local_filename)
@@ -109,8 +108,6 @@ pub async fn download_model_with_progress<F>(
 where
     F: FnMut(u64, Option<u64>) + Send,
 {
-    use futures_util::StreamExt;
-
     let (_, hf_repo, hf_filename, local_filename) = MODEL_SOURCES
         .iter()
         .find(|(id, _, _, _)| *id == model_name)
@@ -135,27 +132,7 @@ where
         return Ok(output_path.to_string_lossy().into_owned());
     }
 
-    let response = reqwest::get(&url).await.map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() {
-        if model_name == "large-v3-turbo" {
-            return Err("large-v3-turbo: coming soon (model may not be available yet)".to_string());
-        }
-        return Err(format!("Download failed: {}", response.status()));
-    }
-
-    let total_bytes = response.content_length();
-    let mut stream = response.bytes_stream();
-    let mut file = std::fs::File::create(&output_path).map_err(|e| e.to_string())?;
-    let mut downloaded: u64 = 0;
-
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| e.to_string())?;
-        file.write_all(&bytes).map_err(|e| e.to_string())?;
-        downloaded += bytes.len() as u64;
-        on_progress(downloaded, total_bytes);
-    }
-
+    super::download::download_to_file(&url, &output_path, &mut on_progress).await?;
     Ok(output_path.to_string_lossy().into_owned())
 }
 

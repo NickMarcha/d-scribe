@@ -1,6 +1,7 @@
 //! Pluggable transcription backends.
 
 mod backend;
+mod download;
 mod engine;
 mod model_download;
 mod remote_api;
