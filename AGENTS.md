@@ -25,7 +25,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 - **Frontend** (`src/`): React, Vite. Calls Tauri commands for recording, transcription, export, project CRUD, playback.
 - **Backend** (`src-tauri/src/`):
   - `lib.rs`: Tauri commands, transcription orchestration (one `WhisperServer` per model per job, English-turn routing)
-  - `audio/`: WASAPI capture: Discord process loopback (falls back to the default output device if Discord isn't running) + default mic, 16 kHz mono 16-bit WAV, gaps padded with silence
+  - `audio/`: WASAPI capture, 16 kHz mono 16-bit WAV, gaps padded with silence. Others: Discord process loopback by default (`others_device_id` empty), or loopback of a chosen output device. Mic: Windows default or `mic_device_id`. If Discord isn't running or exits mid-recording, records silence and reattaches when a Discord process appears (checked every `PROCESS_CHECK`). Chosen devices that can't be opened fail `start_recording`. `measure_level` backs the Test buttons
   - `discord_rpc/`: Discord RPC client, OAuth, token persistence (refresh token), speaking events
   - `session/`: Segment tracking, merge buffer (configurable ms), session state
   - `project.rs`: Save/load, `auto_save_project`, `set_project_saved`, `delete_project`, `purge_old_recent`, `list_projects_with_meta`
@@ -49,16 +49,17 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 
 ## Settings
 
-Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, file name template, auto-record), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
+Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, file name template, auto-record), **Audio** (`AudioSettings.tsx`: mic device, source for others, Test buttons; saves on change), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
 
 ## Gotchas
 
 1. **Whisper engine**: the CUDA 11.8 build silently falls back to CPU on current drivers; use the 12.4 build. Engine DLLs must sit next to `whisper-server.exe` (the zip's `Release/` folder is flattened on unpack).
 2. **Segment extraction**: Sample math is `ms * 16` for 16 kHz. Do not divide by 1000.
-3. **Loopback timing**: loopback streams deliver nothing while the source is silent. `capture_to_wav` pads with silence to wall-clock time so segment timestamps still index the WAV.
-4. **Segment merge buffer**: Short pauses (< buffer ms) are merged; configurable in Settings.
-5. **Unsaved vs saved**: Unsaved = JSON in `projects/recent/`, saved = JSON in `projects/`. Audio always lives in `projects/`. `set_project_saved` moves only the JSON. `purge_recent_command` runs when listing; deletes unsaved recordings (JSON + audio) older than `recent_retention_days`, then the oldest until they fit in `recent_max_gb` (0 = no limit). The open recording is never purged.
-6. **No migration**: Do not add migration logic for old settings keys or registry formats before 1.0.0.
+3. **wasapi `get_device(id)`**: can pass Windows a freed string and fail at random (0x80070002). Look devices up by walking `get_device_collection` and comparing `get_id()` (`open_device`).
+4. **Loopback timing**: loopback streams deliver nothing while the source is silent. `Recorder::pad_to_now` pads with silence to wall-clock time so segment timestamps still index the WAV.
+5. **Segment merge buffer**: Short pauses (< buffer ms) are merged; configurable in Settings.
+6. **Unsaved vs saved**: Unsaved = JSON in `projects/recent/`, saved = JSON in `projects/`. Audio always lives in `projects/`. `set_project_saved` moves only the JSON. `purge_recent_command` runs when listing; deletes unsaved recordings (JSON + audio) older than `recent_retention_days`, then the oldest until they fit in `recent_max_gb` (0 = no limit). The open recording is never purged.
+7. **No migration**: Do not add migration logic for old settings keys or registry formats before 1.0.0.
 
 ## UI and writing
 

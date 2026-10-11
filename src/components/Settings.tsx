@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { AiSettings } from "./AiSettings";
 import { EngineSettings } from "./EngineSettings";
+import { AudioSettings } from "./AudioSettings";
 import { runTask, bytesProgress, useTasks } from "../tasks";
 import "./Settings.css";
 
@@ -84,6 +85,7 @@ export function Settings() {
 
   const [recordingExpanded, setRecordingExpanded] = useState(false);
   const [discordExpanded, setDiscordExpanded] = useState(false);
+  const [audioExpanded, setAudioExpanded] = useState(false);
   const [manageModelsExpanded, setManageModelsExpanded] = useState(false);
   const [selectedModelsExpanded, setSelectedModelsExpanded] = useState(false);
   const [addLanguagePreset, setAddLanguagePreset] = useState("");
@@ -463,6 +465,19 @@ export function Settings() {
                   when you leave or are alone for a minute. Needs Discord connected.
                 </span>
               </div>
+            </div>
+          )}
+        </section>
+
+        <section className="settings-section collapsible">
+          <CollapsibleHeader title="Audio" expanded={audioExpanded} onToggle={() => setAudioExpanded(!audioExpanded)} />
+          {audioExpanded && (
+            <div className="collapsible-content">
+              <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
+                d-scribe records two tracks: your microphone, and everyone else in the call mixed together.
+                Changes here are saved right away and apply to the next recording.
+              </p>
+              <AudioSettings />
             </div>
           )}
         </section>

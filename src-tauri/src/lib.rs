@@ -7,7 +7,7 @@ mod project;
 mod session;
 mod transcription;
 
-use audio::{start_audio_capture, stop_audio_capture, AudioCaptureHandle};
+use audio::{start_audio_capture, stop_audio_capture, AudioCaptureHandle, AudioSources};
 use discord_rpc::{get_channel_info, is_rpc_connected, load_tokens, save_tokens, DiscordRpcClient};
 use export::{export_srt, export_vtt};
 use log::{debug, warn};
@@ -168,6 +168,7 @@ fn start_recording(
     live_remote_model: Option<String>,
     live_remote_api_key: Option<String>,
     live_language_code: Option<String>,
+    audio_sources: Option<AudioSources>,
 ) -> Result<(), String> {
     let channel_info =
         get_channel_info().ok_or("Not connected to Discord. Connect in Settings first.")?;
@@ -347,6 +348,7 @@ fn start_recording(
     let handle = start_audio_capture(
         std::path::Path::new(&loopback_path),
         std::path::Path::new(&mic_path_buf),
+        &audio_sources.unwrap_or_default(),
         loopback_buf,
         mic_buf,
     )?;
@@ -356,6 +358,23 @@ fn start_recording(
         *WAS_LIVE_RECORDING.lock().unwrap() = false;
     }
     Ok(())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn list_audio_devices_command() -> Result<audio::AudioDevices, String> {
+    tauri::async_runtime::spawn_blocking(audio::list_audio_devices)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Peak level (0..1) of a source over 3 seconds, for the Test buttons in Settings.
+#[cfg(windows)]
+#[tauri::command]
+async fn measure_audio_level_command(mic: bool, device_id: Option<String>) -> Result<f32, String> {
+    tauri::async_runtime::spawn_blocking(move || audio::measure_level(mic, device_id, std::time::Duration::from_secs(3)))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -869,6 +888,8 @@ pub fn run() {
             list_remote_models_command,
             transcribe_session_command,
             engine_status_command,
+            list_audio_devices_command,
+            measure_audio_level_command,
             download_engine_command,
             remove_engine_command,
         ])

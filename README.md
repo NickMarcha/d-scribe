@@ -63,7 +63,11 @@ d-scribe reads who is speaking from your Discord client. Discord only allows thi
 
 d-scribe asks Discord for the `rpc` and `identify` scopes.
 
-### 5. Connect and record
+### 5. Check your audio
+
+Open Settings > **Audio**. Pick the microphone you use in Discord (by default d-scribe takes the Windows default, which may be a different one) and click **Test** while you talk. Leave **Other people in the call** on **Discord app** unless you use Discord in a browser.
+
+### 6. Connect and record
 
 1. In Settings, expand **Discord** and click **Connect to Discord**. Approve the popup in Discord. The login is saved, so you usually only do this once.
 2. Join a voice channel. You can do this before or after connecting.
@@ -75,7 +79,7 @@ d-scribe asks Discord for the `rpc` and `identify` scopes.
 6. Read the transcript in the **Read** tab. Click a line to play from there, or drag the slider in the player at the top. Fix speakers, split or merge segments and re-transcribe single lines in the **Edit** tab. Edits save automatically. **Stats** and **AI** are tabs next to them.
 7. Click **Save** to keep the recording until you delete it. **More** has subtitle export (SRT, VTT) and Delete.
 
-### 6. Summaries and notes (optional)
+### 7. Summaries and notes (optional)
 
 Settings > **AI** runs a command-line AI tool you already have on the transcript. The default is [Claude Code](https://claude.com/claude-code) (`claude -p` with all tools turned off). Swap in `ollama run llama3.1`, `llm` or `gemini` if you prefer. d-scribe sends the prompt and transcript on stdin and saves what the tool prints with the project. The prompts (summary, meeting notes, action items) are editable, and you can add your own. **Copy transcript** puts the whole transcript on the clipboard for pasting into a chat app.
 

@@ -293,6 +293,10 @@ export function Session() {
         liveRemoteModel,
         liveRemoteApiKey,
         liveLanguageCode: liveRealtime ? getLanguageCode() : null,
+        audioSources: {
+          micDeviceId: (await store.get<string>("mic_device_id")) || null,
+          othersDeviceId: (await store.get<string>("others_device_id")) || null,
+        },
       };
       await flushPendingSave();
       await invoke("start_recording", args);

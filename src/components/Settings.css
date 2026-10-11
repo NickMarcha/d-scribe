@@ -353,3 +353,51 @@
   width: auto;
   margin: 0;
 }
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.device-row select {
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.level-test {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.level-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.level-track {
+  width: 80px;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.level-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.level-error {
+  font-size: 13px;
+  color: var(--danger);
+}
