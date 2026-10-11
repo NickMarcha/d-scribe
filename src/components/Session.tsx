@@ -81,6 +81,7 @@ export function Session() {
   const [selectedLanguageId, setSelectedLanguageId] = useState("en");
   const [remoteSources, setRemoteSources] = useState<{ id: string; name: string; host: string; transcriptionPath?: string; apiKey?: string }[]>([]);
   const [modelRegistry, setModelRegistry] = useState<{ id: string; type: "integrated" | "remote"; sourceId?: string; modelName?: string }[]>([]);
+  const [installedModels, setInstalledModels] = useState<string[] | null>(null);
   const audioRemoteRef = useRef<HTMLAudioElement | null>(null);
   const audioLocalRef = useRef<HTMLAudioElement | null>(null);
   const [retranscribeModelId, setRetranscribeModelId] = useState("");
@@ -168,6 +169,19 @@ export function Session() {
   function getRegularModelId() {
     return selectedSlot?.regularModel ?? "";
   }
+
+  // Re-read on language change, since models can be downloaded in Settings meanwhile.
+  useEffect(() => {
+    invoke<string[]>("list_installed_model_names_command").then(setInstalledModels).catch(() => setInstalledModels(null));
+  }, [selectedLanguageId]);
+
+  /** First local model the selected language needs that isn't downloaded yet. */
+  const missingModel =
+    installedModels == null
+      ? null
+      : ([getRegularModelId(), selectedSlot?.englishModel].find(
+          (id) => id && getModelType(id) === "integrated" && !installedModels.includes(id),
+        ) ?? null);
 
   function getLanguageCode(): string | null {
     return selectedSlot?.languageCode ?? null;
@@ -614,6 +628,7 @@ export function Session() {
         () => invoke<string>("download_model_command", { modelName }),
       );
       setStatus(`Model downloaded to ${path}`);
+      setInstalledModels(await invoke<string[]>("list_installed_model_names_command"));
     } catch (e) {
       const msg = String(e);
       setStatus(msg.includes("coming soon") ? "large-v3-turbo: coming soon" : `Download failed: ${e}`);
@@ -980,13 +995,9 @@ export function Session() {
                 </option>
               ))}
             </select>
-            {getModelType(getRegularModelId()) === "integrated" && (
-              <button
-                type="button"
-                onClick={() => downloadModel(getRegularModelId())}
-                disabled={transcribing}
-              >
-                Download {getRegularModelId()}
+            {missingModel && (
+              <button type="button" onClick={() => downloadModel(missingModel)} disabled={transcribing}>
+                Download {missingModel}
               </button>
             )}
             <button
