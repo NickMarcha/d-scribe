@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - release
+    paths-ignore:
+      - site/**
+      - .github/workflows/pages.yml
+      - "*.md"
   workflow_dispatch:
 
 jobs:
