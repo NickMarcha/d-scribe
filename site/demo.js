@@ -1,5 +1,6 @@
 // Interactive copy of d-scribe with two made-up calls: the recordings list, then a call with
-// Read, Edit, Stats and AI. Play only moves a clock until a session has an `audio` file.
+// Read, Edit, Stats and AI. Audio is TTS; line times come from whisper, snapped to the pauses.
+// A session without `audio` plays on a silent clock.
 (() => {
   const root = document.getElementById("demo");
   if (!root) return;
@@ -64,19 +65,20 @@
       date: yesterday,
       saved: false,
       transcribed: false,
-      audio: null,
+      audio: "audio/call-with-sam.mp3",
+      durationMs: 30320,
       speakers: ["Leah", "Sam"],
       segs: makeSegs([
-        ["Sam", 4, "Hey, did you get the train tickets for Bergen?"],
-        ["Leah", 5, "Not yet. The prices went up again, so I wanted to check with you first."],
-        ["Sam", 2, "How much are they now?"],
-        ["Leah", 5, "About nine hundred kroner each, if we take the early train on Saturday."],
-        ["Sam", 5, "That's fine. The later one gets in too late for the hike anyway."],
-        ["Leah", 4, "Okay, I'll book the early one. Can you sort out where we stay?"],
-        ["Sam", 5, "Yes. My cousin has a flat near the fish market, I'll ask her tonight."],
-        ["Leah", 3, "Perfect. And bring a rain jacket. It's Bergen."],
-        ["Sam", 4, "Ha, always. I'll message you when I hear from her."],
-        ["Leah", 2, "Sounds good. Talk later."],
+        ["Sam", [100, 2730], "Hey, did you get the train tickets for Bergen?"],
+        ["Leah", [2860, 6100], "Not yet. The prices went up again, so I wanted to check with you first."],
+        ["Sam", [6600, 7540], "How much are they now?"],
+        ["Leah", [7600, 11430], "About nine hundred kroner each, if we take the early train on Saturday."],
+        ["Sam", [11770, 14770], "That's fine. The later one gets in too late for the hike anyway."],
+        ["Leah", [14920, 18110], "Okay, I'll book the early one. Can you sort out where we stay?"],
+        ["Sam", [18410, 22430], "Yes. My cousin has a flat near the fish market, I'll ask her tonight."],
+        ["Leah", [23000, 25120], "Perfect. And bring a rain jacket. It's Bergen."],
+        ["Sam", [25950, 28770], "Ha, always. I'll message you when I hear from her."],
+        ["Leah", [28990, 30150], "Sounds good. Talk later."],
       ]),
       ai: {
         Summary:
@@ -98,6 +100,7 @@
   let open = null; // the session being shown, or null for the list
   let view = "read";
   let query = "";
+  let searchPos = 0; // which match is shown, in matches()
   let now = 0;
   let playing = false;
   let last = 0;
@@ -108,7 +111,7 @@
 
   const bar = `
     <div class="demo-bar">
-      <span class="demo-brand">d-scribe</span>
+      <span class="demo-brand">d-scribe <span class="demo-tag">demo</span></span>
       <span class="demo-tab demo-tab--on">Session</span><span class="demo-tab">Settings</span>
       <span class="demo-status">Discord: connected</span>
     </div>`;
@@ -178,6 +181,7 @@
     open = s;
     view = "read";
     query = "";
+    searchPos = 0;
     now = 0;
     active = -1;
     history = [];
@@ -203,6 +207,11 @@
         <button type="button" data-view="stats" class="demo-view">Stats</button>
         <button type="button" data-view="ai" class="demo-view">AI</button>
         <input class="demo-search demo-text-search" type="search" placeholder="Search transcript" aria-label="Search transcript" />
+        <span class="demo-search-nav" hidden>
+          <span class="demo-muted demo-count"></span>
+          <button type="button" class="demo-btn demo-prev" title="Previous match (Shift+Enter)">Previous</button>
+          <button type="button" class="demo-btn demo-next" title="Next match (Enter)">Next</button>
+        </span>
       </div>
       <div class="demo-body"></div>`;
     if (s.audio) {
@@ -216,13 +225,20 @@
       s.saved = !s.saved;
       renderHead();
     });
-    root.querySelector(".demo-text-search").addEventListener("input", (e) => {
-      query = e.target.value.trim();
-      if (view !== "read") view = "read";
-      renderBody();
-      const hit = root.querySelector(".demo-seg mark");
-      if (hit) scrollInside(hit.parentElement);
+    const searchBox = root.querySelector(".demo-text-search");
+    searchBox.addEventListener("input", () => {
+      query = searchBox.value.trim();
+      searchPos = 0;
+      view = "read";
+      showMatch();
     });
+    searchBox.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      jump(e.shiftKey ? -1 : 1);
+    });
+    root.querySelector(".demo-prev").addEventListener("click", () => jump(-1));
+    root.querySelector(".demo-next").addEventListener("click", () => jump(1));
     root.querySelectorAll(".demo-view").forEach((b) =>
       b.addEventListener("click", () => {
         view = b.dataset.view;
@@ -255,11 +271,43 @@
     return out;
   }
 
-  function mark(text) {
+  // Search: matches are the lines (with text) that contain the query.
+  function matches() {
+    const q = query.toLowerCase();
+    if (!q || !open) return [];
+    return open.segs.flatMap((seg, i) => ((open.transcribed || seg.shown) && seg.text.toLowerCase().includes(q) ? [i] : []));
+  }
+
+  function jump(delta) {
+    const list = matches();
+    if (!list.length) return;
+    searchPos = (searchPos + delta + list.length) % list.length;
+    view = "read";
+    showMatch();
+  }
+
+  function showMatch() {
+    renderBody();
+    const list = matches();
+    const nav = root.querySelector(".demo-search-nav");
+    nav.hidden = !query;
+    root.querySelector(".demo-count").textContent = list.length ? `${searchPos + 1} of ${list.length}` : "No matches";
+    root.querySelectorAll(".demo-prev, .demo-next").forEach((b) => (b.disabled = list.length < 2));
+    const el = root.querySelector(`.demo-seg[data-i="${list[searchPos]}"]`);
+    if (el) scrollInside(el);
+  }
+
+  function mark(text, current) {
     if (!query) return esc(text);
-    const at = text.toLowerCase().indexOf(query.toLowerCase());
-    if (at < 0) return esc(text);
-    return `${esc(text.slice(0, at))}<mark>${esc(text.slice(at, at + query.length))}</mark>${esc(text.slice(at + query.length))}`;
+    const lower = text.toLowerCase();
+    const q = query.toLowerCase();
+    let out = "";
+    let from = 0;
+    for (let at = lower.indexOf(q); at >= 0; at = lower.indexOf(q, from)) {
+      out += `${esc(text.slice(from, at))}<mark${current ? ' class="current"' : ""}>${esc(text.slice(at, at + q.length))}</mark>`;
+      from = at + q.length;
+    }
+    return out + esc(text.slice(from));
   }
 
   function renderBody() {
@@ -269,13 +317,14 @@
     active = -1;
     if (view === "read") {
       const shown = (i) => s.transcribed || s.segs[i].shown;
+      const current = matches()[searchPos];
       body.innerHTML =
         (s.transcribed || transcribing ? "" : `<p class="demo-empty">Not transcribed yet. Click Transcribe.</p>`) +
         blocks(s)
           .map(
             (b) => `<section class="demo-block"><div class="demo-meta"><b>${esc(b.speaker)}</b><span>${fmt(s.segs[b.items[0]].start)}</span></div><p>${
               shown(b.items[0])
-                ? b.items.map((i) => (shown(i) ? `<span class="demo-seg" data-i="${i}">${mark(s.segs[i].text)}</span>` : "")).join(" ")
+                ? b.items.map((i) => (shown(i) ? `<span class="demo-seg" data-i="${i}">${mark(s.segs[i].text, i === current)}</span>` : "")).join(" ")
                 : `<span class="demo-seg demo-seg--empty" data-i="${b.items[0]}">${fmt(b.items.reduce((sum, i) => sum + s.segs[i].end - s.segs[i].start, 0))} of speech</span>`
             }</p></section>`,
           )

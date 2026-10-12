@@ -262,18 +262,43 @@ footer p {
 }
 
 /* Interactive transcript demo: a small copy of the app's session view. */
+.demo-caption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 40px 0 10px;
+}
+
+.demo-caption .muted {
+  font-size: 0.9rem;
+}
+
+.demo-badge,
+.demo-tag {
+  padding: 1px 8px;
+  border: 1px solid var(--accent-text);
+  border-radius: var(--radius);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.demo-tag {
+  margin-left: 4px;
+  padding: 0 6px;
+  font-size: 11px;
+  vertical-align: 2px;
+}
+
 .demo {
-  margin-top: 40px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
   border-radius: var(--radius);
   background: var(--bg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   font-size: 14px;
-}
-
-.demo-hint {
-  margin-top: 10px;
 }
 
 .demo-bar,
@@ -684,6 +709,32 @@ button.demo-link {
   border-radius: 2px;
 }
 
+.demo-seg mark.current {
+  box-shadow: 0 0 0 2px #eab308;
+}
+
+.demo-search-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.demo-search-nav[hidden] {
+  display: none;
+}
+
+.demo-search-nav .demo-btn {
+  font-size: 13px;
+  padding: 3px 8px;
+}
+
+.demo-count {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 .demo-stat {
   display: grid;
   grid-template-columns: 70px 1fr 110px;
@@ -721,6 +772,9 @@ button.demo-link {
   .demo-search {
     max-width: none;
     margin-left: 4px;
+  }
+  .demo-tabs {
+    flex-wrap: wrap;
   }
   .demo-edit-row {
     grid-template-columns: 1fr auto;

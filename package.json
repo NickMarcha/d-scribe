@@ -2,7 +2,7 @@
   "name": "d-scribe",
   "private": true,
   "license": "PolyForm-Noncommercial-1.0.0",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "type": "module",
   "scripts": {
     "dev": "vite",

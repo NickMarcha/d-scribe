@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   deleteSegment,
   formatMs,
@@ -42,6 +42,8 @@ export function Transcript(props: TranscriptProps) {
   const { data, activeIndex, editable } = props;
   const [mode, setMode] = useState<string>("read");
   const [query, setQuery] = useState("");
+  /** Position in `matches` of the search result being shown. */
+  const [searchPos, setSearchPos] = useState(0);
   const view = editable ? mode : "read";
   const extra = props.extraViews?.find((v) => v.id === view);
   const rowRefs = useRef(new Map<number, HTMLElement>());
@@ -53,6 +55,27 @@ export function Transcript(props: TranscriptProps) {
     if (bodyRef.current?.contains(document.activeElement) && document.activeElement?.tagName === "TEXTAREA") return;
     rowRefs.current.get(activeIndex)?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, view]);
+
+  // Segments (with text) that contain the search query, in order.
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return data.segments.map((_, i) => i).filter((i) => (data.texts[i] ?? "").toLowerCase().includes(q));
+  }, [query, data]);
+  const currentMatch = matches.length > 0 ? matches[Math.min(searchPos, matches.length - 1)] : null;
+
+  // Show the first match while typing.
+  useEffect(() => {
+    setSearchPos(0);
+  }, [query]);
+  useEffect(() => {
+    if (currentMatch !== null && view === "read") rowRefs.current.get(currentMatch)?.scrollIntoView({ block: "center" });
+  }, [currentMatch, view]);
+
+  function jumpMatch(delta: number) {
+    if (matches.length === 0) return;
+    setSearchPos((p) => (Math.min(p, matches.length - 1) + delta + matches.length) % matches.length);
+  }
 
   const setRowRef = (i: number) => (el: HTMLElement | null) => {
     if (el) rowRefs.current.set(i, el);
@@ -90,7 +113,13 @@ export function Transcript(props: TranscriptProps) {
           </div>
         )}
         {extra ? null : view === "read" ? (
-          <ReaderSearch data={data} rowRefs={rowRefs} query={query} setQuery={setQuery} />
+          <ReaderSearch
+            query={query}
+            setQuery={setQuery}
+            count={matches.length}
+            position={Math.min(searchPos, Math.max(0, matches.length - 1))}
+            onJump={jumpMatch}
+          />
         ) : (
           <div className="transcript-tools">
             <button onClick={props.onUndo} disabled={!props.canUndo} title="Ctrl+Z">
@@ -121,7 +150,14 @@ export function Transcript(props: TranscriptProps) {
         ) : data.segments.length === 0 ? (
           <p className="transcript-empty">No segments yet.</p>
         ) : view === "read" ? (
-          <Reader data={data} activeIndex={activeIndex} onSeek={props.onSeek} setRowRef={setRowRef} query={query.trim()} />
+          <Reader
+            data={data}
+            activeIndex={activeIndex}
+            onSeek={props.onSeek}
+            setRowRef={setRowRef}
+            query={query.trim()}
+            currentMatch={currentMatch}
+          />
         ) : (
           <Editor {...props} setRowRef={setRowRef} />
         )}
@@ -130,58 +166,50 @@ export function Transcript(props: TranscriptProps) {
   );
 }
 
+/** Search box with a match count and previous/next (also Shift+Enter / Enter). */
 function ReaderSearch({
-  data,
-  rowRefs,
   query,
   setQuery,
+  count,
+  position,
+  onJump,
 }: {
-  data: TranscriptData;
-  rowRefs: MutableRefObject<Map<number, HTMLElement>>;
   query: string;
   setQuery: (q: string) => void;
+  count: number;
+  position: number;
+  onJump: (delta: number) => void;
 }) {
-  const [current, setCurrent] = useState(0);
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return data.segments.map((_, i) => i).filter((i) => (data.texts[i] ?? "").toLowerCase().includes(q));
-  }, [query, data]);
-
-  function jump(delta: number) {
-    if (matches.length === 0) return;
-    const next = (current + delta + matches.length) % matches.length;
-    setCurrent(next);
-    rowRefs.current.get(matches[next])?.scrollIntoView({ block: "center" });
-  }
-
   return (
     <div className="transcript-search">
       <input
         type="search"
         placeholder="Search transcript"
         value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setCurrent(0);
-        }}
+        onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            jump(e.shiftKey ? -1 : 1);
+            onJump(e.shiftKey ? -1 : 1);
           }
         }}
       />
       {query.trim() && (
-        <span className="transcript-search-count">
-          {matches.length === 0 ? "No matches" : `${current + 1} of ${matches.length}`}
-        </span>
+        <>
+          <span className="transcript-search-count">{count === 0 ? "No matches" : `${position + 1} of ${count}`}</span>
+          <button type="button" onClick={() => onJump(-1)} disabled={count < 2} title="Previous match (Shift+Enter)">
+            Previous
+          </button>
+          <button type="button" onClick={() => onJump(1)} disabled={count < 2} title="Next match (Enter)">
+            Next
+          </button>
+        </>
       )}
     </div>
   );
 }
 
-function highlight(text: string, query: string): ReactNode {
+function highlight(text: string, query: string, current = false): ReactNode {
   if (!query) return text;
   const lower = text.toLowerCase();
   const q = query.toLowerCase();
@@ -190,7 +218,11 @@ function highlight(text: string, query: string): ReactNode {
   let at = lower.indexOf(q);
   while (at !== -1) {
     if (at > from) parts.push(text.slice(from, at));
-    parts.push(<mark key={at}>{text.slice(at, at + q.length)}</mark>);
+    parts.push(
+      <mark key={at} className={current ? "current" : undefined}>
+        {text.slice(at, at + q.length)}
+      </mark>,
+    );
     from = at + q.length;
     at = lower.indexOf(q, from);
   }
@@ -207,12 +239,15 @@ function Reader({
   onSeek,
   setRowRef,
   query,
+  currentMatch,
 }: {
   data: TranscriptData;
   activeIndex: number | null;
   onSeek: (i: number) => void;
   setRowRef: (i: number) => (el: HTMLElement | null) => void;
   query: string;
+  /** Segment of the search result being shown; its matches stand out. */
+  currentMatch: number | null;
 }) {
   // Once there is text, leave out segments without any (silence, noise), so the same speaker's
   // lines join up. Before transcription, show each turn once.
@@ -257,7 +292,7 @@ function Reader({
                   onClick={() => onSeek(i)}
                   title={`${formatMs(data.segments[i].start_ms)} to ${formatMs(data.segments[i].end_ms)}`}
                 >
-                  {highlight(text, query)}{" "}
+                  {highlight(text, query, i === currentMatch)}{" "}
                 </span>
               );
             })}
