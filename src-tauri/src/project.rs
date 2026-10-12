@@ -10,6 +10,8 @@ use std::path::Path;
 pub struct ProjectFile {
     pub session_id: String,
     pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub guild_name: Option<String>,
     #[serde(default)]
     pub guild_id: Option<String>,
@@ -38,6 +40,7 @@ impl From<SessionState> for ProjectFile {
         Self {
             session_id: s.session_id,
             created_at: s.created_at,
+            title: s.title,
             guild_name: s.guild_name,
             guild_id: s.guild_id,
             channel_name: s.channel_name,
@@ -60,6 +63,7 @@ impl From<ProjectFile> for SessionState {
         Self {
             session_id: p.session_id,
             created_at: p.created_at,
+            title: p.title,
             guild_name: p.guild_name,
             guild_id: p.guild_id,
             channel_name: p.channel_name,
@@ -212,6 +216,7 @@ pub fn list_projects(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
 pub struct ProjectMeta {
     pub name: String,
     pub path: String,
+    pub title: Option<String>,
     pub guild_name: Option<String>,
     pub channel_name: Option<String>,
     /// Discord channel type: 1=dm, 2=guild_voice, 3=group_dm
@@ -289,6 +294,7 @@ fn collect_projects_from_dir(dir: &Path, saved: bool) -> Result<Vec<ProjectMeta>
                 duration_ms: duration_ms(&f),
                 speakers: speakers(&f),
                 transcribed: f.transcript_texts.iter().any(|t| !t.trim().is_empty()),
+                title: f.title,
                 guild_name: f.guild_name,
                 channel_name: f.channel_name,
                 channel_type: f.channel_type,
@@ -299,6 +305,7 @@ fn collect_projects_from_dir(dir: &Path, saved: bool) -> Result<Vec<ProjectMeta>
             None => ProjectMeta {
                 name,
                 path: path_str,
+                title: None,
                 guild_name: None,
                 channel_name: None,
                 channel_type: None,

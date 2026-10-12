@@ -3,6 +3,7 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { load } from "@tauri-apps/plugin-store";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { StatsPanel } from "./StatsPanel";
 import { PlaybackBar } from "./PlaybackBar";
 import { Transcript, type Speaker } from "./Transcript";
@@ -24,6 +25,7 @@ interface SessionSegment {
 interface SessionState {
   session_id: string;
   created_at: number;
+  title?: string | null;
   guild_name: string | null;
   guild_id: string | null;
   channel_name: string | null;
@@ -76,6 +78,8 @@ export function Session() {
   const [liveSegments, setLiveSegments] = useState<SessionSegment[]>([]);
   const [liveTexts, setLiveTexts] = useState<string[]>([]);
   const headRef = useRef<HTMLDivElement>(null);
+  /** Title being typed, or null when not renaming. */
+  const [titleDraft, setTitleDraft] = useState<string | null>(null);
   const [headHeight, setHeadHeight] = useState(0);
   const [playbackCurrentTime, setPlaybackCurrentTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
@@ -498,6 +502,13 @@ export function Session() {
     syncHistorySize();
   }
 
+  function setTitle(title: string) {
+    const latest = sessionRef.current;
+    if (!latest || (latest.title ?? "") === title) return;
+    dirty.current = true;
+    setSession({ ...latest, title: title || null });
+  }
+
   function updateAiOutputs(change: (list: AiOutput[]) => AiOutput[]) {
     const latest = sessionRef.current;
     if (!latest) return;
@@ -851,6 +862,10 @@ export function Session() {
   }, [recording]);
 
   const isSaved = !!currentProjectPath && projects.some((p) => p.path === currentProjectPath && p.saved);
+  const place = session
+    ? placeLabel({ guild_name: session.guild_name, channel_name: session.channel_name, channel_type: session.channel_type ?? null })
+    : "";
+  const audioFile = session?.audio_paths?.loopback || session?.audio_paths?.microphone || null;
 
   const speakers: Speaker[] = (() => {
     const map = new Map<string, string>();
@@ -943,11 +958,41 @@ export function Session() {
                   <button type="button" className="link-button" onClick={backToRecordings}>
                     Recordings
                   </button>
-                  <span className="session-title" title={session.session_id}>
-                    {placeLabel({ guild_name: session.guild_name, channel_name: session.channel_name, channel_type: session.channel_type ?? null })}
-                    <span className="session-date">{new Date(session.created_at * 1000).toLocaleString()}</span>
-                    {session.live_mode_enabled && <span className="meta-badge">Live</span>}
-                  </span>
+                  {titleDraft !== null ? (
+                    <input
+                      className="session-title-input"
+                      value={titleDraft}
+                      autoFocus
+                      placeholder={place}
+                      aria-label="Title"
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onFocus={(e) => e.target.select()}
+                      onBlur={() => {
+                        setTitle(titleDraft.trim());
+                        setTitleDraft(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                        if (e.key === "Escape") setTitleDraft(null);
+                      }}
+                    />
+                  ) : (
+                    <span className="session-title">
+                      <button
+                        type="button"
+                        className="session-title-text"
+                        onClick={() => setTitleDraft(session.title ?? "")}
+                        title="Click to rename"
+                      >
+                        {session.title || place}
+                      </button>
+                      <span className="session-date">
+                        {session.title && `${place}, `}
+                        {new Date(session.created_at * 1000).toLocaleString()}
+                      </span>
+                      {session.live_mode_enabled && <span className="meta-badge">Live</span>}
+                    </span>
+                  )}
                   <div className="session-head-actions">
                     <select
                       value={selectedLanguageId}
@@ -980,9 +1025,24 @@ export function Session() {
                         {isSaved ? "Saved" : "Save"}
                       </button>
                     )}
-                    <Menu label="More" title="Export and delete">
+                    <Menu label="More" title="Rename, export and delete">
                       {(close) => (
                         <>
+                          <button type="button" onClick={() => { close(); setTitleDraft(session.title ?? ""); }}>
+                            Rename
+                          </button>
+                          {audioFile && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                close();
+                                revealItemInDir(audioFile).catch((e) => setStatus(`Could not open the folder: ${e}`));
+                              }}
+                            >
+                              Show in folder
+                            </button>
+                          )}
+                          <div className="menu-separator" />
                           <button type="button" onClick={() => { close(); exportTranscript("srt"); }}>
                             Export SRT subtitles
                           </button>

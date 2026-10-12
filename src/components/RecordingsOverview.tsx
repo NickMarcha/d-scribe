@@ -4,6 +4,7 @@ import "./RecordingsOverview.css";
 export interface ProjectMeta {
   name: string;
   path: string;
+  title: string | null;
   guild_name: string | null;
   channel_name: string | null;
   /** Discord channel type: 1=dm, 2=guild_voice, 3=group_dm */
@@ -94,7 +95,7 @@ export function RecordingsOverview({ projects, retentionDays, maxGb, onOpen, onS
       if (person && !p.speakers.includes(person)) return false;
       if (savedOnly && !p.saved) return false;
       if (!q) return true;
-      return [p.name, p.guild_name, p.channel_name, ...p.speakers].some((v) => v?.toLowerCase().includes(q));
+      return [p.title, p.name, p.guild_name, p.channel_name, ...p.speakers].some((v) => v?.toLowerCase().includes(q));
     });
   }, [projects, query, server, channel, person, savedOnly]);
 
@@ -127,7 +128,7 @@ export function RecordingsOverview({ projects, retentionDays, maxGb, onOpen, onS
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search people, servers and channels"
+          placeholder="Search titles, people, servers and channels"
           aria-label="Search recordings"
         />
         <select
@@ -200,7 +201,15 @@ export function RecordingsOverview({ projects, retentionDays, maxGb, onOpen, onS
                         : ""}
                     </span>
                     <span className="recording-main">
-                      <span className="recording-place">{placeLabel(p)}</span>
+                      <span className="recording-place">
+                        {p.title ? (
+                          <>
+                            {p.title} <span className="recording-place-sub">{placeLabel(p)}</span>
+                          </>
+                        ) : (
+                          placeLabel(p)
+                        )}
+                      </span>
                       <span className="recording-people">
                         {shown.length > 0 ? shown.join(", ") : "Nobody spoke"}
                         {more > 0 && ` and ${more} more`}

@@ -44,6 +44,9 @@ pub struct SessionSegment {
 pub struct SessionState {
     pub session_id: String,
     pub created_at: u64,
+    /// Name the user gave the recording; the overview shows the place when empty.
+    #[serde(default)]
+    pub title: Option<String>,
     pub guild_name: Option<String>,
     pub guild_id: Option<String>,
     pub channel_name: Option<String>,
@@ -307,6 +310,7 @@ pub fn stop_session(audio_paths: SessionAudioPaths) -> Option<SessionState> {
             segments: session.segments,
             transcript_texts: vec![], // Filled by transcription or manual edit
             live_transcript_texts: None, // Filled by lib when stopping live recording
+            title: None,
             audio_paths,
             ai_outputs: Vec::new(),
         })

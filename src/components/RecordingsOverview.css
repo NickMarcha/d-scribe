@@ -105,6 +105,12 @@
   font-weight: 500;
 }
 
+.recording-place-sub {
+  margin-left: 4px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .recording-people {
   font-size: 13px;
   color: var(--text-muted);
