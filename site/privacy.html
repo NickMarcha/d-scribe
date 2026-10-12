@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy - d-scribe</title>
+    <link rel="icon" href="img/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="wrap">
+        <a class="brand" href="./"><img src="img/icon.png" alt="" />d-scribe</a>
+        <nav>
+          <a href="./#download">Download</a>
+          <a href="./#access">Get access</a>
+          <a href="privacy.html">Privacy</a>
+          <a href="https://github.com/NickMarcha/d-scribe">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <div class="wrap prose">
+          <h1>Privacy</h1>
+          <p>Last updated 12 October 2026.</p>
+          <p>
+            d-scribe is a desktop app. There are no d-scribe servers and no accounts, and the app collects no usage
+            data or crash reports. This page lists everything that leaves your PC.
+          </p>
+
+          <h2>Your recordings stay on your PC</h2>
+          <p>
+            Audio, transcripts, titles, notes and AI results are saved in
+            <code>%APPDATA%\d-scribe\recordings</code> on your computer. Transcription runs on your computer too. You
+            can open, move or delete these folders yourself.
+          </p>
+
+          <h2>Discord</h2>
+          <p>
+            d-scribe talks to the Discord app on your PC to find out which voice channel you're in, who is in it and
+            who is speaking. To allow that, you sign in with Discord once (scopes <code>rpc</code> and
+            <code>identify</code>). The sign-in token is stored on your PC so you don't have to sign in again. d-scribe
+            doesn't post anything to Discord and doesn't read your messages.
+          </p>
+
+          <h2>Downloads and updates</h2>
+          <p>The app connects to these places when it needs to:</p>
+          <ul>
+            <li>GitHub, to check for d-scribe updates and to download the Whisper transcription engine</li>
+            <li>Hugging Face, when you download a speech recognition model</li>
+          </ul>
+          <p>These requests contain no recordings or transcripts.</p>
+
+          <h2>Optional features that send data elsewhere</h2>
+          <ul>
+            <li>
+              <strong>Remote transcription.</strong> If you add a remote transcription service in Settings, audio of
+              each turn is sent to the service you chose.
+            </li>
+            <li>
+              <strong>AI prompts.</strong> If you run an AI prompt on a transcript, the transcript is passed to the AI
+              command you set up (for example Claude Code), which sends it to that AI provider.
+            </li>
+          </ul>
+          <p>Both are off until you set them up, and their own privacy terms apply.</p>
+
+          <h2>Test access requests</h2>
+          <p>
+            The access form is a Google Form. It asks for your Discord username and, if you want, what you'll use
+            d-scribe for. The username is used only to add you as a tester of the d-scribe Discord app. To have your
+            request removed, or to be removed as a tester, open an issue on
+            <a href="https://github.com/NickMarcha/d-scribe/issues">GitHub</a> or contact
+            <a href="https://github.com/NickMarcha">NickMarcha</a>.
+          </p>
+
+          <h2>This website</h2>
+          <p>
+            This site is hosted on GitHub Pages and loads fonts from Google Fonts and the form from Google Forms. Those
+            services may log your IP address under their own privacy policies. The site sets no cookies of its own and
+            has no analytics.
+          </p>
+
+          <h2>Recording other people</h2>
+          <p>
+            You decide what to record. Let the people in the call know that you record, and check the rules where you
+            and they live.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <p>Not affiliated with Discord. <a href="./">Back to d-scribe</a></p>
+      </div>
+    </footer>
+  </body>
+</html>

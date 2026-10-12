@@ -1,7 +1,8 @@
 [package]
 name = "d-scribe"
-version = "0.1.16"
-description = "A Tauri App"
+version = "0.1.17"
+description = "Transcripts of Discord calls with who said what"
+license = "PolyForm-Noncommercial-1.0.0"
 authors = ["you"]
 edition = "2021"
 

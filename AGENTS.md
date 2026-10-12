@@ -10,6 +10,14 @@ App is not released yet. Do not prioritize backwards compatibility or repair log
 
 Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WASAPI loopback + mic), tracks speakers via Discord RPC, transcribes with whisper.cpp CLI. Each recording is a folder under `recordings/` (auto-saved, unsaved until you click Save) and listed by day in `RecordingsOverview.tsx`; playback supports remote/local/both with transcript auto-scroll. Discord auth is persisted via refresh token. Auto-updates via tauri-plugin-updater (checked on startup, `src/components/UpdateNotice.tsx`).
 
+## Website
+
+`site/` is a static page (index, privacy, `download.js` picks the latest `-setup.exe` from the GitHub API and shows the SmartScreen note on click). `.github/workflows/pages.yml` deploys it to https://nickmarcha.github.io/d-scribe/ on pushes to `release` or `main` that touch `site/`. The test access Google Form is embedded there and linked from the app (`ACCESS_REQUEST_URL`). Screenshots in `site/img/` are taken from `npx vite` with a temporary `src/devMock.ts` (mockIPC from `@tauri-apps/api/mocks` returning sample recordings, imported first in `main.tsx`) and Playwright at 2x scale; delete the mock afterwards, never commit it. Keep the tone friendly: meeting notes, not legal warnings.
+
+## License
+
+PolyForm Noncommercial 1.0.0 (`LICENSE.md`).
+
 ## Build & Run
 
 - Dev: `npm run tauri dev` (runs Vite + cargo with `transcription-whisper-cli` feature)
@@ -50,7 +58,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 
 ## Settings
 
-Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, recordings folder, auto-record, start with Windows via the autostart plugin, saved immediately), **Audio** (`AudioSettings.tsx`: mic device, source for others, Test buttons; saves on change), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
+Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, recordings folder, auto-record (turning it on asks for confirmation with a short note about recording rules), start with Windows via the autostart plugin, saved immediately), **Audio** (`AudioSettings.tsx`: mic device, source for others, Test buttons; saves on change), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
 
 ## Gotchas
 

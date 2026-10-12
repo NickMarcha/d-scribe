@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { load } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { AiSettings } from "./AiSettings";
 import { EngineSettings } from "./EngineSettings";
@@ -15,7 +16,7 @@ const STORE_PATH = "settings.json";
 /** The d-scribe Discord app. Used when the Client ID field is empty. Only its App Testers can connect. */
 const SHARED_CLIENT_ID = "1477100857064689897";
 /** Form for asking to be added as an App Tester of the shared app. Hidden while empty. */
-const ACCESS_REQUEST_URL = "";
+const ACCESS_REQUEST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfEq7Gsd6_ZWJrqwfG-2VybBkpysdSmPh0wMPpTrWN5yyZ4DQ/viewform";
 
 const WHISPER_MODELS = [
   "tiny.en", "base.en", "small.en", "medium.en",
@@ -487,7 +488,24 @@ export function Settings() {
               </div>
               <div className="form-group">
                 <label className="checkbox-label">
-                  <input type="checkbox" checked={autoRecord} onChange={(e) => setAutoRecord(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={autoRecord}
+                    onChange={async (e) => {
+                      const on = e.target.checked;
+                      if (
+                        on &&
+                        !(await ask(
+                          "d-scribe will record every call you join with someone else, without asking each time.\n\n" +
+                            "Rules for recording calls differ between countries. Check what applies where you and the " +
+                            "people you talk to live, and let them know you record, for example for meeting notes.",
+                          { title: "Record calls automatically?", kind: "warning", okLabel: "Turn on", cancelLabel: "Cancel" },
+                        ))
+                      )
+                        return;
+                      setAutoRecord(on);
+                    }}
+                  />
                   Record automatically
                 </label>
                 <span className="field-hint">

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>d-scribe: transcripts of your Discord calls</title>
+    <meta
+      name="description"
+      content="d-scribe records Discord calls on your PC, knows who said what, and turns them into transcripts you can read, search and summarize."
+    />
+    <link rel="icon" href="img/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="wrap">
+        <a class="brand" href="./"><img src="img/icon.png" alt="" />d-scribe</a>
+        <nav>
+          <a href="#download">Download</a>
+          <a href="#access">Get access</a>
+          <a href="privacy.html">Privacy</a>
+          <a href="https://github.com/NickMarcha/d-scribe">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap">
+          <h1>Notes from your Discord calls, with who said what</h1>
+          <p>
+            d-scribe records your Discord calls on your own PC and turns them into a transcript you can read, search
+            and summarize. Good for meetings, interviews, study groups and anything you'd rather not take notes on
+            while talking.
+          </p>
+          <div class="actions">
+            <a class="button primary download-link" href="https://github.com/NickMarcha/d-scribe/releases/latest"
+              >Download for Windows</a
+            >
+            <a class="button" href="#access">Request test access</a>
+            <span class="muted version"></span>
+          </div>
+          <div class="notice smartscreen" hidden>
+            <p><strong>Windows may warn you when you open the installer.</strong></p>
+            <p>
+              The installer isn't signed with a paid certificate, so Windows SmartScreen can show "Windows protected
+              your PC". Click <strong>More info</strong>, then <strong>Run anyway</strong>. The source code and the
+              build that makes the installer are on
+              <a href="https://github.com/NickMarcha/d-scribe">GitHub</a>.
+            </p>
+          </div>
+          <img class="shot" src="img/session.png" alt="A transcript in d-scribe, with speaker names and times" />
+        </div>
+      </section>
+
+      <section>
+        <div class="wrap">
+          <h2>What it does</h2>
+          <div class="features">
+            <div>
+              <h3>Knows who is talking</h3>
+              <p>Discord tells d-scribe who speaks when, so every line has a name, not "Speaker 2".</p>
+            </div>
+            <div>
+              <h3>Transcribes on your PC</h3>
+              <p>
+                Uses Whisper on your own computer, much faster with an NVIDIA graphics card. Calls that switch between
+                Norwegian and English work too.
+              </p>
+            </div>
+            <div>
+              <h3>Read, fix and search</h3>
+              <p>
+                Click a line to hear it. Fix words and speakers, search a call, and export subtitles.
+              </p>
+            </div>
+            <div>
+              <h3>Summaries with your AI</h3>
+              <p>Send a transcript to the AI tool you already use, for a summary, action points or your own prompt.</p>
+            </div>
+            <div>
+              <h3>Records by itself</h3>
+              <p>
+                Optional: d-scribe sits in the tray and starts recording when you join a call with others, and stops
+                when you leave.
+              </p>
+            </div>
+            <div>
+              <h3>Your files, in plain folders</h3>
+              <p>
+                Each call is a folder with the audio and a transcript file. Unsaved calls are cleaned up after a while,
+                saved ones are kept.
+              </p>
+            </div>
+          </div>
+          <div class="pair">
+            <img src="img/overview.png" alt="The list of recordings, grouped by day" />
+            <img src="img/settings.png" alt="Recording settings with disk use" />
+          </div>
+        </div>
+      </section>
+
+      <section id="download">
+        <div class="wrap">
+          <h2>Get started</h2>
+          <ol class="steps">
+            <li>
+              <strong>Get access to Discord voice info.</strong>
+              <p>
+                Discord only shares who is speaking with apps that have added you as a tester. Request access below,
+                and you'll get an invite in Discord. You can also
+                <a href="https://github.com/NickMarcha/d-scribe#4-get-access-to-discord">use your own Discord app</a>,
+                which takes a few minutes and needs no approval.
+              </p>
+            </li>
+            <li>
+              <strong>Install d-scribe.</strong>
+              <p>
+                <a class="download-link" href="https://github.com/NickMarcha/d-scribe/releases/latest"
+                  >Download the installer</a
+                >
+                and run it. It updates itself after that.
+              </p>
+            </li>
+            <li>
+              <strong>Connect Discord and pick a language.</strong>
+              <p>
+                In Settings, click Connect and approve in Discord. Then download a model for your language. The app
+                fetches the transcription engine the first time you transcribe.
+              </p>
+            </li>
+            <li>
+              <strong>Join a call and record.</strong>
+              <p>Click Start recording, or turn on automatic recording. When the call ends, click Transcribe.</p>
+            </li>
+          </ol>
+          <h3>Requirements</h3>
+          <ul class="plain">
+            <li>Windows 10 or 11, and the Discord desktop app</li>
+            <li>
+              An NVIDIA graphics card is recommended. Without one, transcribing works but takes much longer with the
+              most accurate models.
+            </li>
+            <li>About 3 GB of disk for a large model, and about 230 MB per hour of recording</li>
+          </ul>
+          <p class="muted">
+            Let the people in the call know that you record. It's polite, and in some places it's required.
+          </p>
+        </div>
+      </section>
+
+      <section id="access">
+        <div class="wrap">
+          <h2>Request test access</h2>
+          <p class="muted">
+            Discord limits how many testers an app can have, so access is given by hand. You'll get an invite to the
+            d-scribe app in Discord when you're added.
+          </p>
+          <iframe
+            class="form-frame"
+            src="https://docs.google.com/forms/d/e/1FAIpQLSfEq7Gsd6_ZWJrqwfG-2VybBkpysdSmPh0wMPpTrWN5yyZ4DQ/viewform?embedded=true"
+            title="Request test access"
+            loading="lazy"
+            >Loading…</iframe
+          >
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <p>
+          d-scribe is free for personal and other noncommercial use under the
+          <a href="https://github.com/NickMarcha/d-scribe/blob/main/LICENSE.md">PolyForm Noncommercial license</a>.
+          For commercial use, <a href="https://github.com/NickMarcha">get in touch</a>.
+        </p>
+        <p>
+          Not affiliated with Discord. <a href="privacy.html">Privacy</a> ·
+          <a href="https://github.com/NickMarcha/d-scribe/issues">Report a problem</a>
+        </p>
+      </div>
+    </footer>
+
+    <script src="download.js"></script>
+  </body>
+</html>

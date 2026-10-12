@@ -4,7 +4,7 @@
 
 d-scribe records a Discord voice call and turns it into a transcript with a speaker name on every line. It uses Discord RPC to see who is talking and [whisper.cpp](https://github.com/ggml-org/whisper.cpp) to transcribe.
 
-It's a personal project, so expect rough edges. It only runs on Windows for now, because audio capture uses WASAPI. Grab the installer from [Releases](https://github.com/NickMarcha/d-scribe/releases). The app checks for updates when it starts.
+It's a personal project, so expect rough edges. It only runs on Windows for now, because audio capture uses WASAPI. Grab the installer from the [website](https://nickmarcha.github.io/d-scribe/) or [Releases](https://github.com/NickMarcha/d-scribe/releases). The app checks for updates when it starts.
 
 ## What it does
 
@@ -140,4 +140,6 @@ Plain `RUST_LOG=debug` floods the terminal with WASAPI trace logs.
 
 ## License
 
-MIT
+[PolyForm Noncommercial 1.0.0](LICENSE.md): free to use, change and share for any noncommercial purpose, keeping the copyright notice. For commercial use, get in touch. Versions before 0.1.17 were published with "MIT" in this README.
+
+Third-party parts keep their own licenses: whisper.cpp and the Whisper models (MIT), NB-Whisper (Apache-2.0).
