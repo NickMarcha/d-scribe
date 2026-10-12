@@ -15,8 +15,8 @@ const STORE_PATH = "settings.json";
 
 /** The d-scribe Discord app. Used when the Client ID field is empty. Only its App Testers can connect. */
 const SHARED_CLIENT_ID = "1477100857064689897";
-/** Form for asking to be added as an App Tester of the shared app. Hidden while empty. */
-const ACCESS_REQUEST_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfEq7Gsd6_ZWJrqwfG-2VybBkpysdSmPh0wMPpTrWN5yyZ4DQ/viewform";
+/** The d-scribe Discord server, where people ask to be added as App Testers (#request-access). Hidden while empty. */
+const ACCESS_REQUEST_URL = "https://discord.gg/WPvhz8x7SF";
 
 const WHISPER_MODELS = [
   "tiny.en", "base.en", "small.en", "medium.en",
@@ -568,7 +568,7 @@ export function Settings() {
                   <>
                     {" "}
                     <button type="button" className="link-button" onClick={() => openUrl(ACCESS_REQUEST_URL)}>
-                      Request access
+                      Request access on the d-scribe Discord
                     </button>
                   </>
                 )}
