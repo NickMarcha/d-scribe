@@ -10,11 +10,14 @@
   const yesterday = new Date(today.getTime() - DAY);
   yesterday.setHours(19, 34);
 
+  // Lines are [speaker, seconds, text] for a made-up clock, or [speaker, [startMs, endMs], text]
+  // when timed against an audio file.
   function makeSegs(lines) {
     let t = 1500;
-    return lines.map(([speaker, secs, text]) => {
-      const s = { speaker, text, start: t, end: t + secs * 1000 };
-      t += secs * 1000 + 900;
+    return lines.map(([speaker, time, text]) => {
+      if (Array.isArray(time)) return { speaker, text, start: time[0], end: time[1] };
+      const s = { speaker, text, start: t, end: t + time * 1000 };
+      t += time * 1000 + 900;
       return s;
     });
   }
@@ -27,23 +30,25 @@
       date: today,
       saved: true,
       transcribed: true,
-      audio: null,
+      audio: "audio/sprint-planning.mp3",
+      durationMs: 56240,
       speakers: ["Leah", "Sam", "Jonas"],
+      // Timed against the audio: whisper's line starts, snapped to the nearest pause.
       segs: makeSegs([
-        ["Leah", 5, "Okay, let's start. The main thing today is the release next week and what we cut."],
-        ["Sam", 6, "I think the export can wait. Nobody has asked for Word files yet."],
-        ["Jonas", 5, "Agreed. But search has to be in, that's what people keep asking for."],
-        ["Leah", 6, "Search is mostly done. I need a day to make it fast on long recordings."],
-        ["Leah", 3, "Maybe two, if the old recordings need converting."],
-        ["Sam", 5, "What about the onboarding? New users get stuck on the Discord step."],
-        ["Leah", 7, "Yes. I want a short checklist on the first screen: connect Discord, pick a language, record a test call."],
-        ["Jonas", 4, "Can we test that with someone who hasn't seen the app?"],
-        ["Sam", 4, "My brother can try it on Thursday. He'll find every problem."],
-        ["Jonas", 3, "He found three bugs in my bike app in ten minutes."],
-        ["Leah", 6, "Perfect. So, search and onboarding are in, and export moves to the next release."],
-        ["Jonas", 5, "I'll write the release notes when the build is ready. Friday?"],
-        ["Sam", 3, "Friday works for me."],
-        ["Leah", 4, "Great. Thanks, both. Same time next week."],
+        ["Leah", [20, 4270], "Okay, let's start. The main thing today is the release next week and what we cut."],
+        ["Sam", [5060, 8670], "I think the export can wait. Nobody has asked for Word files yet."],
+        ["Jonas", [8810, 13520], "Agreed. But search has to be in, that's what people keep asking for."],
+        ["Leah", [13860, 17290], "Search is mostly done. I need a day to make it fast on long recordings."],
+        ["Leah", [17620, 20150], "Maybe two, if the old recordings need converting."],
+        ["Sam", [20330, 24530], "What about the onboarding? New users get stuck on the Discord step."],
+        ["Leah", [24900, 30070], "Yes. I want a short checklist on the first screen: connect Discord, pick a language, record a test call."],
+        ["Jonas", [30370, 34680], "Can we test that with someone who hasn't seen the app?"],
+        ["Sam", [34900, 38110], "My brother can try it on Thursday. He'll find every problem."],
+        ["Jonas", [38250, 40620], "He found three bugs in my bike app in ten minutes."],
+        ["Leah", [41040, 46550], "Perfect. So, search and onboarding are in, and export moves to the next release."],
+        ["Jonas", [46990, 50460], "I'll write the release notes when the build is ready. Friday?"],
+        ["Sam", [50700, 52180], "Friday works for me."],
+        ["Leah", [52260, 55950], "Great. Thanks, both. Same time next week."],
       ]),
       ai: {
         Summary:
@@ -87,7 +92,7 @@
   };
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const clock = (d) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  const length = (s) => s.segs[s.segs.length - 1].end + 1000;
+  const length = (s) => s.durationMs ?? s.segs[s.segs.length - 1].end + 1000;
   const minutes = (ms) => (ms < 60000 ? "< 1 min" : `${Math.round(ms / 60000)} min`);
 
   let open = null; // the session being shown, or null for the list
