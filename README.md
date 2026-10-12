@@ -53,7 +53,7 @@ The Whisper engine itself (whisper.cpp) downloads the first time you transcribe.
 
 d-scribe reads who is speaking from your Discord client. Discord only allows this for accounts on an app's tester list, so pick one of these:
 
-- **Use the d-scribe app.** Ask to be added as a tester (Settings > **Discord** has a **Request access** link). Once you're added, accept the invite from Discord and leave the Client ID field empty.
+- **Use the d-scribe app.** Ask to be added as a tester: join the [d-scribe Discord](https://discord.gg/WPvhz8x7SF) and post in #request-access, or use the [form](https://docs.google.com/forms/d/e/1FAIpQLSfEq7Gsd6_ZWJrqwfG-2VybBkpysdSmPh0wMPpTrWN5yyZ4DQ/viewform) (Settings > **Discord** in the app links to it too). Once you're added, accept the invite from Discord and leave the Client ID field empty.
 - **Use your own Discord app.** No need to ask anyone:
   1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
   2. On the **OAuth2** page, turn on **Public Client**.

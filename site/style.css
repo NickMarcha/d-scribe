@@ -213,6 +213,10 @@ section {
   margin-bottom: 0;
 }
 
+.form-heading {
+  margin: 32px 0 12px;
+}
+
 .form-frame {
   width: 100%;
   max-width: 680px;
