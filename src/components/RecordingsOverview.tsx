@@ -53,7 +53,7 @@ function formatDuration(ms: number) {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
-function formatSize(bytes: number) {
+export function formatSize(bytes: number) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   return `${Math.round(bytes / 1024 ** 2)} MB`;
 }

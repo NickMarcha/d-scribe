@@ -55,6 +55,13 @@
   border-color: transparent;
 }
 
+.collapsible-summary {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .collapsible-chevron {
   font-size: 0.8em;
   color: var(--text-muted);

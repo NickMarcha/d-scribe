@@ -7,6 +7,7 @@ import { AiSettings } from "./AiSettings";
 import { EngineSettings } from "./EngineSettings";
 import { AudioSettings } from "./AudioSettings";
 import { runTask, bytesProgress, useTasks } from "../tasks";
+import { formatSize } from "./RecordingsOverview";
 import "./Settings.css";
 
 const STORE_PATH = "settings.json";
@@ -82,7 +83,19 @@ export function Settings() {
   const [addRemoteModel, setAddRemoteModel] = useState("");
   const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
-  const downloadingModel = useTasks().find((t) => t.id.startsWith("model:"))?.id.slice("model:".length) ?? null;
+  const tasks = useTasks();
+  const downloadingModel = tasks.find((t) => t.id.startsWith("model:"))?.id.slice("model:".length) ?? null;
+  const [usage, setUsage] = useState<{
+    recordingCount: number;
+    recordings: number;
+    unsaved: number;
+    models: number;
+    engines: number;
+  } | null>(null);
+  // Re-measured when a download or transcription finishes.
+  useEffect(() => {
+    invoke<NonNullable<typeof usage>>("storage_usage_command").then(setUsage).catch(() => setUsage(null));
+  }, [tasks.length]);
   const [modelsDir, setModelsDir] = useState<string | null>(null);
 
   const [recordingExpanded, setRecordingExpanded] = useState(false);
@@ -362,10 +375,13 @@ export function Settings() {
 
   function CollapsibleHeader({
     title,
+    summary,
     expanded,
     onToggle,
   }: {
     title: string;
+    /** Short text on the right, e.g. disk use. */
+    summary?: string;
     expanded: boolean;
     onToggle: () => void;
   }) {
@@ -377,6 +393,7 @@ export function Settings() {
       >
         <span className="collapsible-chevron">{expanded ? "▼" : "▶"}</span>
         <span>{title}</span>
+        {summary && <span className="collapsible-summary">{summary}</span>}
       </button>
     );
   }
@@ -395,6 +412,12 @@ export function Settings() {
         <section className="settings-section collapsible">
           <CollapsibleHeader
             title="Recording"
+            summary={
+              usage
+                ? `${usage.recordingCount} ${usage.recordingCount === 1 ? "recording" : "recordings"}, ${formatSize(usage.recordings)}` +
+                  (usage.unsaved > 0 ? ` (${formatSize(usage.unsaved)} unsaved)` : "")
+                : undefined
+            }
             expanded={recordingExpanded}
             onToggle={() => setRecordingExpanded(!recordingExpanded)}
           />
@@ -586,6 +609,7 @@ export function Settings() {
         <section className="settings-section collapsible">
           <CollapsibleHeader
             title="Manage models"
+            summary={usage ? `Models ${formatSize(usage.models)}, engines ${formatSize(usage.engines)}` : undefined}
             expanded={manageModelsExpanded}
             onToggle={() => setManageModelsExpanded(!manageModelsExpanded)}
           />

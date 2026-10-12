@@ -393,6 +393,39 @@ fn start_recording(
     Ok(())
 }
 
+fn dir_size(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| match e.metadata() {
+                    Ok(m) if m.is_dir() => dir_size(&e.path()),
+                    Ok(m) => m.len(),
+                    Err(_) => 0,
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// Disk use for the summaries in Settings, in bytes.
+#[tauri::command]
+async fn storage_usage_command(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let recordings = list_projects_with_meta(&app)?;
+        let unsaved: u64 = recordings.iter().filter(|p| !p.saved).map(|p| p.size_bytes).sum();
+        Ok(serde_json::json!({
+            "recordingCount": recordings.len(),
+            "recordings": recordings.iter().map(|p| p.size_bytes).sum::<u64>(),
+            "unsaved": unsaved,
+            "models": dir_size(&models_dir(&app)?),
+            "engines": dir_size(&paths::engines_dir(&app)?),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(windows)]
 #[tauri::command]
 async fn list_audio_devices_command() -> Result<audio::AudioDevices, String> {
@@ -900,6 +933,7 @@ pub fn run() {
             get_recordings_dir,
             get_models_dir,
             get_engines_dir,
+            storage_usage_command,
             discord_rpc_connect,
             discord_rpc_auto_reconnect,
             discord_rpc_connection_state,
