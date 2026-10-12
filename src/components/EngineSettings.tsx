@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { runTask, bytesProgress, useTasks } from "../tasks";
 
 interface EngineStatus {
@@ -71,6 +72,16 @@ export function EngineSettings() {
             {downloading === "cpu" ? "Downloading CPU engine..." : "Download CPU engine"}
           </button>
         )}
+        <button
+          type="button"
+          onClick={() =>
+            invoke<string>("get_engines_dir")
+              .then((dir) => openPath(dir))
+              .catch((e) => setError(`Could not open the folder: ${e}`))
+          }
+        >
+          Open engines folder
+        </button>
       </div>
       {!engine.nvidia && !engine.cuda && (
         <span className="field-hint">No NVIDIA driver found, so only the CPU engine is available.</span>

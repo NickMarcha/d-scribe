@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { load } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { AiSettings } from "./AiSettings";
 import { EngineSettings } from "./EngineSettings";
@@ -238,7 +238,7 @@ export function Settings() {
   async function openModelsDir() {
     try {
       const dir = await invoke<string>("get_models_dir");
-      await revealItemInDir(dir);
+      await openPath(dir);
     } catch (e) {
       setStatus(`Failed to open folder: ${e}`);
     }
@@ -449,8 +449,11 @@ export function Settings() {
                 <div className="button-row" style={{ marginTop: 0 }}>
                   <code>{recordingsDir}</code>
                   {recordingsDir && (
-                    <button type="button" onClick={() => revealItemInDir(recordingsDir)}>
-                      Show in folder
+                    <button
+                      type="button"
+                      onClick={() => openPath(recordingsDir).catch((e) => setStatus(`Failed to open folder: ${e}`))}
+                    >
+                      Open folder
                     </button>
                   )}
                 </div>
@@ -589,6 +592,18 @@ export function Settings() {
           {manageModelsExpanded && (
             <div className="collapsible-content">
               <EngineSettings />
+              <div className="form-group">
+                <label>Downloaded models</label>
+                <div className="button-row" style={{ marginTop: 0 }}>
+                  {modelsDir && <code>{modelsDir}</code>}
+                  <button type="button" onClick={openModelsDir}>
+                    Open models folder
+                  </button>
+                </div>
+                <span className="field-hint">
+                  Whisper models (.bin files) you download below are stored here.
+                </span>
+              </div>
               <h4 className="settings-subsection">Remote sources</h4>
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
                 Add an OpenAI-compatible API to transcribe remotely. Only the host is required.
@@ -657,13 +672,6 @@ export function Settings() {
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
                 Integrated models run Whisper on this machine. Remote models call one of the sources above.
               </p>
-              {modelsDir && (
-                <div className="models-dir-row">
-                  <button type="button" className="open-folder-btn" onClick={openModelsDir}>
-                    Open models folder
-                  </button>
-                </div>
-              )}
               <div className="model-registry-list">
                 {modelRegistry.map((m) => (
                   <div key={m.id} className="model-registry-item">

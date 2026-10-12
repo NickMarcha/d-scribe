@@ -46,6 +46,13 @@ fn get_recordings_dir(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_engines_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = paths::engines_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn get_models_dir(app: tauri::AppHandle) -> Result<String, String> {
     models_dir(&app).map(|p| p.to_string_lossy().into_owned())
 }
@@ -892,6 +899,7 @@ pub fn run() {
             get_log_file_path,
             get_recordings_dir,
             get_models_dir,
+            get_engines_dir,
             discord_rpc_connect,
             discord_rpc_auto_reconnect,
             discord_rpc_connection_state,

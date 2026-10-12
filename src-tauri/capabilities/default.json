@@ -7,6 +7,10 @@
     "core:default",
     "dialog:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$APPDATA" }, { "path": "$APPDATA/**" }]
+    },
     "store:default",
     "shell:allow-execute",
     "log:default",
