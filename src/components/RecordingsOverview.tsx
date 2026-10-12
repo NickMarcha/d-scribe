@@ -13,6 +13,8 @@ export interface ProjectMeta {
   saved: boolean;
   duration_ms: number;
   speakers: string[];
+  /** Everyone else in the call when it started. */
+  others: string[];
   transcribed: boolean;
   size_bytes: number;
 }
@@ -28,13 +30,19 @@ interface RecordingsOverviewProps {
 
 const MAX_SPEAKERS_SHOWN = 4;
 
-/** Where a recording happened: "Server / channel", or the kind of call. */
-export function placeLabel(p: { guild_name: string | null; channel_name: string | null; channel_type: number | null }) {
+/** Where a recording happened: "Server / channel", "Call with Name", or the kind of call. */
+export function placeLabel(p: {
+  guild_name: string | null;
+  channel_name: string | null;
+  channel_type: number | null;
+  others: string[];
+}) {
+  const withOthers = p.others.length > 0 ? `with ${p.others.join(", ")}` : "";
   if (p.guild_name || p.channel_type === 2) {
     return [p.guild_name ?? "Unknown server", p.channel_name].filter(Boolean).join(" / ");
   }
-  if (p.channel_type === 1) return "Direct call";
-  if (p.channel_type === 3) return p.channel_name ? `Group call: ${p.channel_name}` : "Group call";
+  if (p.channel_type === 1) return withOthers ? `Call ${withOthers}` : "Direct call";
+  if (p.channel_type === 3) return p.channel_name ? `Group call: ${p.channel_name}` : `Group call ${withOthers}`.trim();
   return p.channel_name ?? "Unknown channel";
 }
 

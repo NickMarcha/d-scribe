@@ -12,9 +12,9 @@ use audio::{start_audio_capture, stop_audio_capture, AudioCaptureHandle, AudioSo
 use discord_rpc::{get_channel_info, is_rpc_connected, load_tokens, save_tokens, DiscordRpcClient};
 use export::{export_srt, export_vtt};
 use log::{debug, warn};
-use paths::{app_data_dir, discord_tokens_path, models_dir, projects_dir};
+use paths::{app_data_dir, discord_tokens_path, models_dir};
 use project::{
-    auto_save_project, delete_project, format_project_name, list_projects, list_projects_with_meta,
+    auto_save_project, delete_project, list_projects_with_meta,
     load_project, purge_old_recent, save_project,
 };
 use session::{
@@ -41,8 +41,8 @@ fn get_log_file_path(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_projects_dir(app: tauri::AppHandle) -> Result<String, String> {
-    projects_dir(&app).map(|p| p.to_string_lossy().into_owned())
+fn get_recordings_dir(app: tauri::AppHandle) -> Result<String, String> {
+    paths::recordings_dir(&app).map(|p| p.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -168,10 +168,7 @@ fn exit_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn start_recording(
     app: tauri::AppHandle,
-    output_path: String,
-    mic_path: String,
     segment_merge_buffer_ms: Option<u64>,
-    project_name_template: Option<String>,
     live_realtime: Option<bool>,
     live_model_path: Option<String>,
     live_transcription_mode: Option<String>,
@@ -185,10 +182,21 @@ fn start_recording(
         get_channel_info().ok_or("Not connected to Discord. Connect in Settings first.")?;
     let user_labels: std::collections::HashMap<String, String> = channel_info.user_labels.clone();
     let buffer_ms = segment_merge_buffer_ms.unwrap_or(1000);
-    let template =
-        project_name_template.unwrap_or_else(|| "{guild}_{channel}_{timestamp}".to_string());
     let live = live_realtime.unwrap_or(false);
     let self_user_id = channel_info.self_user_id.clone();
+    let dir = project::create_recording_dir(
+        &app,
+        &project::place_name(
+            channel_info.guild_name.as_deref(),
+            channel_info.channel_name.as_deref(),
+            channel_info.channel_type,
+            &user_labels,
+            self_user_id.as_deref(),
+        ),
+    )?;
+    let output_path = dir.join(project::OTHERS_AUDIO).to_string_lossy().into_owned();
+    let mic_path = dir.join(project::YOU_AUDIO).to_string_lossy().into_owned();
+    let session_id = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
 
     start_session(
         channel_info.guild_name,
@@ -199,7 +207,7 @@ fn start_recording(
         self_user_id.clone(),
         user_labels.clone(),
         buffer_ms,
-        template,
+        session_id,
         live,
     );
 
@@ -356,13 +364,19 @@ fn start_recording(
         (None, None, output_path.clone(), mic_path.clone())
     };
 
-    let handle = start_audio_capture(
+    let handle = match start_audio_capture(
         std::path::Path::new(&loopback_path),
         std::path::Path::new(&mic_path_buf),
         &audio_sources.unwrap_or_default(),
         loopback_buf,
         mic_buf,
-    )?;
+    ) {
+        Ok(h) => h,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+    };
     *AUDIO_HANDLE.lock().unwrap() = Some(handle);
     tray::set_recording(&app, true);
     *SESSION_AUDIO_PATHS.lock().unwrap() = Some((output_path, mic_path));
@@ -441,22 +455,13 @@ fn get_channel_info_command() -> Result<Option<serde_json::Value>, String> {
 }
 
 #[tauri::command]
-fn save_project_command(
-    app: tauri::AppHandle,
-    path: String,
-    state: SessionState,
-) -> Result<(), String> {
-    save_project(&app, std::path::Path::new(&path), &state)
+fn save_project_command(path: String, state: SessionState) -> Result<(), String> {
+    save_project(std::path::Path::new(&path), &state)
 }
 
 #[tauri::command]
 fn load_project_command(path: String) -> Result<SessionState, String> {
     load_project(std::path::Path::new(&path))
-}
-
-#[tauri::command]
-fn list_projects_command(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    list_projects(&app)
 }
 
 #[tauri::command]
@@ -467,13 +472,14 @@ fn list_projects_with_meta_command(
 }
 
 #[tauri::command]
-fn auto_save_project_command(app: tauri::AppHandle, state: SessionState) -> Result<String, String> {
-    auto_save_project(&app, &state)
+fn auto_save_project_command(state: SessionState) -> Result<String, String> {
+    auto_save_project(&state)
 }
 
+/// Deletes the recording's folder (transcript and audio).
 #[tauri::command]
-fn delete_project_command(path: String, delete_audio: bool) -> Result<(), String> {
-    delete_project(std::path::Path::new(&path), delete_audio)
+fn delete_project_command(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    delete_project(&app, std::path::Path::new(&path))
 }
 
 #[tauri::command]
@@ -487,8 +493,8 @@ fn purge_recent_command(
 }
 
 #[tauri::command]
-fn set_project_saved_command(app: tauri::AppHandle, path: String, saved: bool) -> Result<String, String> {
-    project::set_project_saved(&app, std::path::Path::new(&path), saved)
+fn set_project_saved_command(path: String, saved: bool) -> Result<(), String> {
+    project::set_project_saved(std::path::Path::new(&path), saved)
 }
 
 #[tauri::command]
@@ -758,19 +764,6 @@ async fn run_ai_command(app: tauri::AppHandle, command: String, input: String) -
 }
 
 #[tauri::command]
-fn format_project_name_command(
-    template: String,
-    guild: Option<String>,
-    channel: Option<String>,
-) -> Result<String, String> {
-    Ok(format_project_name(
-        &template,
-        guild.as_deref(),
-        channel.as_deref(),
-    ))
-}
-
-#[tauri::command]
 fn export_transcript(
     path: String,
     format: String,
@@ -897,7 +890,7 @@ pub fn run() {
             run_ai_command,
             get_app_data_dir,
             get_log_file_path,
-            get_projects_dir,
+            get_recordings_dir,
             get_models_dir,
             discord_rpc_connect,
             discord_rpc_auto_reconnect,
@@ -907,13 +900,11 @@ pub fn run() {
             stop_recording,
             save_project_command,
             load_project_command,
-            list_projects_command,
             list_projects_with_meta_command,
             auto_save_project_command,
             delete_project_command,
             purge_recent_command,
             set_project_saved_command,
-            format_project_name_command,
             export_transcript,
             list_models_command,
             download_model_command,

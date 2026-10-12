@@ -41,8 +41,6 @@ interface SessionState {
   ai_outputs?: AiOutput[];
 }
 
-const DEFAULT_TEMPLATE = "{guild}_{channel}_{timestamp}";
-
 interface LanguageSlot {
   id: string;
   label: string;
@@ -68,7 +66,6 @@ export function Session() {
   const [retention, setRetention] = useState({ days: 10, maxGb: 20 });
   const [currentProjectPath, setCurrentProjectPath] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [deleteAudio, setDeleteAudio] = useState(false);
   const [status, setStatus] = useState("");
   const [playbackMode, setPlaybackMode] = useState<"remote" | "local" | "both">("both");
   const [localVolume, setLocalVolume] = useState(1);
@@ -244,24 +241,7 @@ export function Session() {
     }
     setStatus("Starting...");
     try {
-      const [projectsPath, channelInfo] = await Promise.all([
-        invoke<string>("get_projects_dir"),
-        invoke<{ guild_name?: string; channel_name?: string } | null>("get_channel_info_command"),
-      ]);
       const store = await load("settings.json", { defaults: {}, autoSave: true });
-      const projectNameTemplate = (await store.get<string>("project_name_template")) || DEFAULT_TEMPLATE;
-      const guild = channelInfo?.guild_name ?? null;
-      const channel = channelInfo?.channel_name ?? null;
-      const name = await invoke<string>("format_project_name_command", {
-        template: projectNameTemplate,
-        guild,
-        channel,
-      });
-      const timestamp = Date.now();
-      const safeName = name.replace(/[<>:"/\\|?*]/g, "_");
-      const loopbackPath = `${projectsPath}/${safeName}_${timestamp}_loopback.wav`;
-      const micPath = `${projectsPath}/${safeName}_${timestamp}_mic.wav`;
-
       const bufferMs = (await store.get<number>("segment_merge_buffer_ms")) ?? 1000;
 
       let liveModelPath: string | null = null;
@@ -286,10 +266,7 @@ export function Session() {
       }
 
       const args: Record<string, unknown> = {
-        outputPath: loopbackPath,
-        micPath,
         segmentMergeBufferMs: bufferMs,
-        projectNameTemplate: projectNameTemplate,
         liveRealtime,
         liveModelPath,
         liveTranscriptionMode,
@@ -424,8 +401,7 @@ export function Session() {
   async function setSaved(path: string, saved: boolean) {
     try {
       if (path === currentProjectPath) await flushPendingSave();
-      const newPath = await invoke<string>("set_project_saved_command", { path, saved });
-      if (path === currentProjectPath) setCurrentProjectPath(newPath);
+      await invoke("set_project_saved_command", { path, saved });
       loadProjects();
     } catch (e) {
       setStatus(`Could not ${saved ? "save" : "unsave"}: ${e}`);
@@ -449,13 +425,12 @@ export function Session() {
   async function confirmDelete() {
     if (!deleteTarget) return;
     try {
-      await invoke("delete_project_command", { path: deleteTarget, deleteAudio });
+      await invoke("delete_project_command", { path: deleteTarget });
       if (currentProjectPath === deleteTarget) {
         setSession(null);
         setCurrentProjectPath(null);
       }
       setDeleteTarget(null);
-      setDeleteAudio(false);
       loadProjects();
       setStatus("Recording deleted.");
     } catch (e) {
@@ -863,7 +838,15 @@ export function Session() {
 
   const isSaved = !!currentProjectPath && projects.some((p) => p.path === currentProjectPath && p.saved);
   const place = session
-    ? placeLabel({ guild_name: session.guild_name, channel_name: session.channel_name, channel_type: session.channel_type ?? null })
+    ? placeLabel({
+        guild_name: session.guild_name,
+        channel_name: session.channel_name,
+        channel_type: session.channel_type ?? null,
+        others: Object.entries(session.user_labels ?? {})
+          .filter(([id]) => id !== session.self_user_id)
+          .map(([, name]) => name)
+          .sort(),
+      })
     : "";
   const audioFile = session?.audio_paths?.loopback || session?.audio_paths?.microphone || null;
 
@@ -933,7 +916,6 @@ export function Session() {
             onSetSaved={setSaved}
             onDelete={(path) => {
               setDeleteTarget(path);
-              setDeleteAudio(false);
             }}
           />
         </div>
@@ -1058,7 +1040,6 @@ export function Session() {
                                 onClick={() => {
                                   close();
                                   setDeleteTarget(currentProjectPath);
-                                  setDeleteAudio(false);
                                 }}
                               >
                                 Delete recording
@@ -1163,14 +1144,7 @@ export function Session() {
         <div className="delete-modal-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="delete-modal" onClick={(e) => e.stopPropagation()}>
             <h4>Delete recording?</h4>
-            <label className="delete-audio-checkbox">
-              <input
-                type="checkbox"
-                checked={deleteAudio}
-                onChange={(e) => setDeleteAudio(e.target.checked)}
-              />
-              Also delete the audio files (loopback and microphone WAV)
-            </label>
+            <p>This deletes its folder: the transcript, notes and audio.</p>
             <div className="delete-modal-actions">
               <button type="button" onClick={() => setDeleteTarget(null)}>
                 Cancel

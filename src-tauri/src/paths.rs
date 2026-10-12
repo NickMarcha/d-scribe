@@ -8,16 +8,9 @@ pub fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|e| e.to_string())
 }
 
-/// Get the projects directory, creating it if necessary.
-pub fn projects_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app_data_dir(app)?.join("projects");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir)
-}
-
-/// Get the recent (auto-saved) projects directory.
-pub fn recent_projects_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = projects_dir(app)?.join("recent");
+/// One folder per recording (see `project.rs`), creating it if necessary.
+pub fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app_data_dir(app)?.join("recordings");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -55,7 +48,7 @@ pub fn log_file_path(app: &AppHandle) -> Result<PathBuf, String> {
 /// Ensure all app directories exist.
 pub fn ensure_directories(app: &AppHandle) -> Result<(), String> {
     app_data_dir(app)?;
-    projects_dir(app)?;
+    recordings_dir(app)?;
     models_dir(app)?;
     let _ = log_file_path(app);
     Ok(())

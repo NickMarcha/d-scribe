@@ -67,7 +67,7 @@ export function Settings() {
   const [autoRecord, setAutoRecord] = useState(false);
   const [startWithWindows, setStartWithWindows] = useState(false);
   const [recentMaxGb, setRecentMaxGb] = useState(20);
-  const [nameTemplate, setNameTemplate] = useState("");
+  const [recordingsDir, setRecordingsDir] = useState("");
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
   const [showInstructions, setShowInstructions] = useState(false);
   const [status, setStatus] = useState("");
@@ -148,7 +148,7 @@ export function Settings() {
       setAutoRecord((await store.get<boolean>("auto_record")) ?? false);
       setStartWithWindows(await isAutostartEnabled().catch(() => false));
       setRecentMaxGb((await store.get<number>("recent_max_gb")) ?? 20);
-      setNameTemplate((await store.get<string>("project_name_template")) ?? "");
+      setRecordingsDir(await invoke<string>("get_recordings_dir").catch(() => ""));
 
       const sources = (await store.get<RemoteSource[]>("remote_sources")) || [];
       setRemoteSources(sources);
@@ -188,7 +188,6 @@ export function Settings() {
       await store.set("recent_retention_days", recentRetentionDays);
       await store.set("auto_record", autoRecord);
       await store.set("recent_max_gb", recentMaxGb);
-      await store.set("project_name_template", nameTemplate.trim());
       await store.set("remote_sources", remoteSources);
       await store.set("model_registry", modelRegistry);
       await store.set("language_slots", languageSlots);
@@ -446,16 +445,18 @@ export function Settings() {
                 </span>
               </div>
               <div className="form-group">
-                <label htmlFor="name-template">File name template</label>
-                <input
-                  id="name-template"
-                  type="text"
-                  value={nameTemplate}
-                  onChange={(e) => setNameTemplate(e.target.value)}
-                  placeholder="{guild}_{channel}_{timestamp}"
-                />
+                <label>Recordings folder</label>
+                <div className="button-row" style={{ marginTop: 0 }}>
+                  <code>{recordingsDir}</code>
+                  {recordingsDir && (
+                    <button type="button" onClick={() => revealItemInDir(recordingsDir)}>
+                      Show in folder
+                    </button>
+                  )}
+                </div>
                 <span className="field-hint">
-                  Placeholders: {"{guild}"}, {"{channel}"}, {"{timestamp}"}, {"{date}"}, {"{time}"}
+                  Each call gets its own folder, named by start time and place (for example "2026-10-12 14.32 Call
+                  with Haaroon"), holding recording.json (transcript and notes), others.wav and you.wav.
                 </span>
               </div>
               <div className="form-group">

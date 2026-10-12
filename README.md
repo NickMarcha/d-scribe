@@ -17,7 +17,7 @@ It's a personal project, so expect rough edges. It only runs on Windows for now,
 - Lists every recording by day, with who spoke, where and for how long. Filter by server, channel or person, or search.
 - Unsaved recordings are deleted after 10 days or when they use more than 20 GB (both adjustable). Click **Save** on a recording to keep it until you delete it.
 - Plays back the remote audio, your local audio, or both, and scrolls the transcript along with playback.
-- Lists your projects on the start screen. Click one to open it. When you delete one, you can also delete its audio files.
+- Lists your projects on the start screen. Click one to open it. Deleting one deletes its folder.
 - Saves your Discord login with a refresh token and reconnects on startup.
 - Lives in the tray: closing the window keeps it running (and recording automatically). Quit from the tray menu. It can start with Windows.
 
@@ -104,15 +104,14 @@ d-scribe/
 
 | What | Where |
 |------|-------|
-| Saved projects | `%APPDATA%/d-scribe/projects/` |
-| Unsaved recordings (deleted after the retention period or size limit) | `%APPDATA%/d-scribe/projects/recent/` |
+| Recordings, one folder per call (`recording.json`, `others.wav`, `you.wav`). Unsaved ones are deleted after the retention period or size limit | `%APPDATA%/d-scribe/recordings/` |
 | Models | `%APPDATA%/d-scribe/models/` |
 | Whisper engines (CPU and GPU) | `%APPDATA%/d-scribe/engines/` |
 | Temporary transcription files | `%APPDATA%/d-scribe/transcribe_temp/` |
 
 ## Options
 
-- **Project name template.** Set on the start screen. Controls session IDs and filenames. Placeholders are `{guild}`, `{channel}`, `{timestamp}`, `{date}` and `{time}`.
+- **Recording folders** are named by start time and place, for example `2026-10-12 14.32 Call with Haaroon` or `2026-10-12 20.00 Server - General`.
 - **Recent sessions retention (days).** How long auto-saved sessions are kept. Default is 10.
 - **Segment merge buffer (ms).** Pauses shorter than this stay in the same segment. Default is 1000.
 - **Playback mode.** Remote, Local or Both, set in the playback bar. Default is Both, and the app remembers your choice.
