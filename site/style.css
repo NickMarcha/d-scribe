@@ -150,6 +150,7 @@ section {
 .shot {
   display: block;
   width: 100%;
+  height: auto;
   margin-top: 40px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -177,6 +178,7 @@ section {
 
 .pair img {
   width: 100%;
+  height: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
