@@ -12,7 +12,7 @@ Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WAS
 
 ## Website
 
-`site/` is a static page (index, privacy, `download.js` picks the latest `-setup.exe` from the GitHub API and shows the SmartScreen note on click). `.github/workflows/pages.yml` deploys it to https://nickmarcha.github.io/d-scribe/ on pushes to `release` or `main` that touch `site/`. Test access: the d-scribe Discord server (https://discord.gg/WPvhz8x7SF, #request-access; owner adds testers by hand in the Developer Portal and gives the Tester role), linked from the site and the app (`ACCESS_REQUEST_URL`). Screenshots in `site/img/` are taken from `npx vite` with a temporary `src/devMock.ts` (mockIPC from `@tauri-apps/api/mocks` returning sample recordings, imported first in `main.tsx`) and Playwright at 2x scale; delete the mock afterwards, never commit it. Keep the tone friendly: meeting notes, not legal warnings.
+`site/` is a static page (index, privacy, `download.js` picks the latest `-setup.exe` from the GitHub API and shows the SmartScreen note on click). `.github/workflows/pages.yml` deploys it to https://nickmarcha.github.io/d-scribe/ on pushes to `release` (the only branch) that touch `site/`. Test access: the d-scribe Discord server (https://discord.gg/WPvhz8x7SF, #request-access; owner adds testers by hand in the Developer Portal and gives the Tester role), linked from the site and the app (`ACCESS_REQUEST_URL`). Screenshots in `site/img/` are taken from `npx vite` with a temporary `src/devMock.ts` (mockIPC from `@tauri-apps/api/mocks` returning sample recordings, imported first in `main.tsx`) and Playwright at 2x scale; delete the mock afterwards, never commit it. Keep the tone friendly: meeting notes, not legal warnings.
 
 ## License
 

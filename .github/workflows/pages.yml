@@ -3,7 +3,7 @@ name: site
 # Publishes site/ to https://nickmarcha.github.io/d-scribe/
 on:
   push:
-    branches: [release, main]
+    branches: [release]
     paths: [site/**, .github/workflows/pages.yml]
   workflow_dispatch:
 
