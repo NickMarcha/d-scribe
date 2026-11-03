@@ -33,7 +33,7 @@ Windows may say "Windows protected your PC", because the installer isn't signed 
 
 d-scribe reads who is speaking from your Discord app. Discord only allows that for accounts on an app's tester list, so pick one:
 
-- **Use the d-scribe app.** Join the [d-scribe Discord](https://discord.gg/WPvhz8x7SF) and ask in #request-access. When you're added, accept the invite from Discord. Leave the Client ID field in Settings empty.
+- **Use the d-scribe app.** Join the [d-scribe Discord](https://discord.gg/WPvhz8x7SF) and ask in #request-access. Accept the friend request you get from the owner (Discord only allows adding friends as testers), then the invite to the d-scribe app. Leave the Client ID field in Settings empty.
 - **Use your own Discord app.** No waiting, about five minutes:
   1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
   2. On the **OAuth2** page, turn on **Public Client**, and add `https://localhost` under **Redirects**.
