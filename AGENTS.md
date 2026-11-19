@@ -14,6 +14,10 @@ Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WAS
 
 `site/` is a static page (index, privacy, `download.js` picks the latest `-setup.exe` from the GitHub API and shows the SmartScreen note on click). `.github/workflows/pages.yml` deploys it to https://nickmarcha.github.io/d-scribe/ on pushes to `release` (the only branch) that touch `site/`. Test access: the d-scribe Discord server (https://discord.gg/WPvhz8x7SF, #request-access; owner sends a friend request, since the Developer Portal only adds friends as testers, then adds them by hand and gives the Tester role), linked from the site and the app (`ACCESS_REQUEST_URL`). Screenshots in `site/img/` are taken from `npx vite` with a temporary `src/devMock.ts` (mockIPC from `@tauri-apps/api/mocks` returning sample recordings, imported first in `main.tsx`) and Playwright at 2x scale; delete the mock afterwards, never commit it. Keep the tone friendly: meeting notes, not legal warnings.
 
+## Releases and #updates
+
+`publish.yml` builds a draft release on pushes to `release` and sets its notes from the PRs merged since the last published release (GitHub's generated notes; label a PR `skip-changelog` to leave it out, see `.github/release.yml`). PR titles are the changelog, so write them for users. Publishing the release (`gh release edit app-vX.Y.Z --draft=false --latest`) runs `discord-updates.yml`, which posts the list to #updates in the d-scribe Discord through the `DISCORD_UPDATES_WEBHOOK` repo secret (`.github/scripts/discord_update.py`, `--dry-run` to preview). #announcements is for bigger news.
+
 ## License
 
 PolyForm Noncommercial 1.0.0 (`LICENSE.md`).

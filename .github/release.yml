@@ -1,0 +1,5 @@
+# Release notes are generated from merged PRs. Label a PR skip-changelog to leave it out.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
