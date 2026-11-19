@@ -35,10 +35,13 @@ src-tauri/gen/
 .DS_Store
 Thumbs.db
 
-# Env
+# Env and secrets (see secrets/README.md). secrets/ stays local for now.
 .env
-.env.local
-.env.*.local
+.env*
+*.env
+keys.txt
+*.key
+secrets/
 
 # Claude Code worktrees
 .claude/worktrees/

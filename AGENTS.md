@@ -18,6 +18,10 @@ Tauri 2 app: React/TypeScript frontend, Rust backend. Records Discord voice (WAS
 
 `publish.yml` builds a draft release on pushes to `release` and sets its notes from the PRs merged since the last published release (GitHub's generated notes; label a PR `skip-changelog` to leave it out, see `.github/release.yml`). PR titles are the changelog, so write them for users. Publishing the release (`gh release edit app-vX.Y.Z --draft=false --latest`) runs `discord-updates.yml`, which posts the list to #updates in the d-scribe Discord through the `DISCORD_UPDATES_WEBHOOK` repo secret (`.github/scripts/discord_update.py`, `--dry-run` to preview). #announcements is for bigger news.
 
+## Secrets
+
+`secrets/` (gitignored for now, local only) holds `age`-encrypted credentials, such as the d-scribe Discord bot token used through `secrets/discord_api.py`. Read `secrets/README.md` before using or adding one, and never print decrypted values.
+
 ## License
 
 PolyForm Noncommercial 1.0.0 (`LICENSE.md`).
