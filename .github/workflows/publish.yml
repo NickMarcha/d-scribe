@@ -7,6 +7,9 @@ on:
     paths-ignore:
       - site/**
       - .github/workflows/pages.yml
+      - .github/workflows/discord-updates.yml
+      - .github/scripts/**
+      - .github/release.yml
       - "*.md"
   workflow_dispatch:
 
@@ -42,6 +45,7 @@ jobs:
         run: npm install
 
       - uses: tauri-apps/tauri-action@action-v0.6.1
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -54,3 +58,23 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # Release notes list the PRs merged since the last published release (see .github/release.yml).
+      # discord-updates.yml posts them to #updates when the release is published.
+      - name: release notes from merged PRs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: app-v${{ steps.tauri.outputs.appVersion }}
+        run: |
+          prev=$(gh release view --json tagName -q .tagName || true)
+          if [ "$prev" = "$TAG" ]; then
+            echo "$TAG is already published; leaving its notes alone."
+            exit 0
+          fi
+          args=(-f tag_name="$TAG" -f target_commitish="$GITHUB_SHA")
+          if [ -n "$prev" ]; then args+=(-f previous_tag_name="$prev"); fi
+          gh api "repos/$GH_REPO/releases/generate-notes" "${args[@]}" -q .body > notes.md
+          cat notes.md
+          gh release edit "$TAG" --notes-file notes.md

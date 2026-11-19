@@ -1,0 +1,23 @@
+name: discord-updates
+
+# Posts each published release to #updates in the d-scribe Discord. Drafts don't trigger this;
+# it runs when `gh release edit --draft=false` publishes the release.
+on:
+  release:
+    types: [published]
+
+jobs:
+  post:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/scripts
+      - name: post to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_UPDATES_WEBHOOK }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: python3 .github/scripts/discord_update.py
