@@ -41,7 +41,7 @@ function update(id: string, changes: Partial<Task>) {
 
 /** Estimated milliseconds left, from the average rate so far. Null until there's enough to go on. */
 export function timeLeftMs(t: Task, now = Date.now()): number | null {
-  if (!t.total || !t.started) return null;
+  if (!t.total || !t.started || t.done >= t.total) return null;
   const elapsed = now - t.started.at;
   const progressed = t.done - t.started.done;
   if (elapsed < 3000 || progressed <= 0) return null;

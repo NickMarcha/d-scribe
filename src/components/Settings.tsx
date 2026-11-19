@@ -9,6 +9,7 @@ import { EngineSettings } from "./EngineSettings";
 import { AudioSettings } from "./AudioSettings";
 import { runTask, bytesProgress, useTasks } from "../tasks";
 import { formatSize } from "./RecordingsOverview";
+import { useDebouncedSave } from "../useDebouncedSave";
 import "./Settings.css";
 
 const STORE_PATH = "settings.json";
@@ -196,9 +197,8 @@ export function Settings() {
   }
 
   // Every change is saved shortly after it's made; there is no Save button to forget.
-  useEffect(() => {
-    if (!loaded) return;
-    const timer = setTimeout(async () => {
+  useDebouncedSave(
+    async () => {
       try {
         const store = await load(STORE_PATH, { defaults: {}, autoSave: true });
         await store.set("client_id", clientId);
@@ -213,9 +213,10 @@ export function Settings() {
       } catch (e) {
         setStatus(`Could not save settings: ${e}`);
       }
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [loaded, clientId, segmentMergeBufferMs, recentRetentionDays, autoRecord, recentMaxGb, remoteSources, modelRegistry, languageSlots]);
+    },
+    [clientId, segmentMergeBufferMs, recentRetentionDays, autoRecord, recentMaxGb, remoteSources, modelRegistry, languageSlots],
+    loaded,
+  );
 
   function addModelToRegistry(model: RegistryModel) {
     if (modelRegistry.some((m) => m.id === model.id)) return;
