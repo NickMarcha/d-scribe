@@ -5,7 +5,7 @@
   bottom: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: minmax(120px, 220px) 1fr auto;
+  grid-template-columns: fit-content(320px) 1fr auto;
   align-items: center;
   gap: 6px 12px;
   padding: 8px 16px;

@@ -1,8 +1,16 @@
-import { useTasks, type Task } from "../tasks";
+import { timeLeftMs, useTasks, type Task } from "../tasks";
 import "./TaskBar.css";
 
 function formatMb(bytes: number) {
   return `${Math.round(bytes / 1024 / 1024)} MB`;
+}
+
+function formatTimeLeft(ms: number) {
+  const s = Math.ceil(ms / 1000);
+  if (s < 60) return `${s} s left`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min left`;
+  return `${Math.floor(m / 60)} h ${m % 60} min left`;
 }
 
 function progressText(t: Task) {
@@ -18,9 +26,10 @@ export function TaskBar() {
     <div className="task-bar" role="status">
       {tasks.map((t) => {
         const pct = t.total ? Math.min(100, (t.done / t.total) * 100) : null;
+        const left = timeLeftMs(t);
         return (
           <div key={t.id} className="task-row">
-            <span className="task-label">{t.label}</span>
+            <span className="task-label" title={t.label}>{t.label}</span>
             <div className="task-track">
               <div
                 className={`task-fill${pct == null ? " task-fill--indeterminate" : ""}`}
@@ -30,6 +39,7 @@ export function TaskBar() {
             <span className="task-text">
               {progressText(t)}
               {pct != null && ` (${Math.floor(pct)}%)`}
+              {left != null && `, ${formatTimeLeft(left)}`}
             </span>
           </div>
         );

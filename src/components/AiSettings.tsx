@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useDebouncedSave } from "../useDebouncedSave";
 import { DEFAULT_AI_COMMAND, DEFAULT_AI_PROMPTS, loadAiConfig, saveAiConfig, type AiPrompt } from "./aiConfig";
 
 /** Settings section for the AI command and prompts. Saves on change. */
@@ -6,7 +7,7 @@ export function AiSettings() {
   const [expanded, setExpanded] = useState(false);
   const [command, setCommand] = useState(DEFAULT_AI_COMMAND);
   const [prompts, setPrompts] = useState<AiPrompt[]>(DEFAULT_AI_PROMPTS);
-  const loaded = useRef(false);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     loadAiConfig()
@@ -15,18 +16,14 @@ export function AiSettings() {
         setPrompts(c.prompts);
       })
       .catch((e) => console.error("Failed to load AI settings:", e))
-      .finally(() => {
-        loaded.current = true;
-      });
+      .finally(() => setLoaded(true));
   }, []);
 
-  useEffect(() => {
-    if (!loaded.current) return;
-    const timer = setTimeout(() => {
-      saveAiConfig(command, prompts).catch((e) => console.error("Failed to save AI settings:", e));
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [command, prompts]);
+  useDebouncedSave(
+    () => saveAiConfig(command, prompts).catch((e) => console.error("Failed to save AI settings:", e)),
+    [command, prompts],
+    loaded,
+  );
 
   function updatePrompt(id: string, changes: Partial<AiPrompt>) {
     setPrompts((list) => list.map((p) => (p.id === id ? { ...p, ...changes } : p)));

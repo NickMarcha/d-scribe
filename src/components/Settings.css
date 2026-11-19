@@ -3,25 +3,8 @@
   padding-bottom: 48px;
 }
 
-.settings-sticky-bar {
-  position: sticky;
-  top: 48px;
-  z-index: 10;
-  background: var(--bg);
-  padding: 12px 0;
+.settings-autosave-note {
   margin-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.save-all-btn {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-}
-
-.save-all-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
 }
 
 .settings-sections {
@@ -143,7 +126,7 @@
 
 .language-slots-table th,
 .language-slots-table td {
-  padding: 8px 12px;
+  padding: 8px 6px;
   text-align: left;
   border-bottom: 1px solid var(--border);
 }
@@ -153,7 +136,11 @@
   color: var(--text-muted);
 }
 
-.language-slots-table select,
+.language-slots-table select {
+  width: 100%;
+  min-width: 0;
+}
+
 .language-slots-actions select {
   min-width: 140px;
 }

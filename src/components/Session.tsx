@@ -591,20 +591,25 @@ export function Session() {
     if (!session) return;
     setTranscribing(true);
     setStatus("");
+    const modelId = getRegularModelId();
+    const remoteModel = resolveRemoteConfig(modelId)?.modelName;
+    const englishModelId = selectedSlot?.englishModel;
+    const models =
+      remoteModel ?? (englishModelId && englishModelId !== modelId ? `${modelId}, ${englishModelId} for English` : modelId);
     const texts = await runTask(
       "transcribe",
-      "Loading the model",
+      remoteModel ? `Starting ${models}` : `Loading ${models}`,
       [
         {
           event: "transcribe-progress",
-          map: (p) => ({ done: p.done, total: p.total, unit: "items", label: "Transcribing segments" }),
+          map: (p) => ({ done: p.done, total: p.total, unit: "items", label: `Transcribing with ${models}` }),
         },
         {
-      event: "engine-download-progress",
-      map: (p) => ({ ...bytesProgress(p), label: "Downloading the Whisper engine" }),
-    },
+          event: "engine-download-progress",
+          map: (p) => ({ ...bytesProgress(p), label: "Downloading the Whisper engine" }),
+        },
       ],
-      () => runTranscription(getRegularModelId(), undefined, selectedSlot?.englishModel),
+      () => runTranscription(modelId, undefined, englishModelId),
     );
     setTranscribing(false);
     if (texts) {
