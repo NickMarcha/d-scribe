@@ -14,7 +14,33 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Only build when this version isn't published yet, so a push without a version bump
+  # can't overwrite the files of a release people already have.
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: src-tauri/tauri.conf.json
+          sparse-checkout-cone-mode: false
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "$(gh release view "app-v$version" --json isDraft -q .isDraft 2>/dev/null)" = "false" ]; then
+            echo "::notice::app-v$version is already published. Bump the version to build a new release."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   publish-tauri:
+    needs: check-version
+    if: needs.check-version.outputs.build == 'true'
     permissions:
       contents: write
     strategy:
