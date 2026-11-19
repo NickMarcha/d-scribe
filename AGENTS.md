@@ -58,7 +58,7 @@ Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%A
 
 ## Settings
 
-Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, recordings folder, auto-record (turning it on asks for confirmation with a short note about recording rules), start with Windows via the autostart plugin, saved immediately), **Audio** (`AudioSettings.tsx`: mic device, source for others, Test buttons; saves on change), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Sticky "Save all settings" button.
+Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording** (segment merge buffer, unsaved retention days and size limit, recordings folder, auto-record (turning it on asks for confirmation with a short note about recording rules), start with Windows via the autostart plugin, saved immediately), **Audio** (`AudioSettings.tsx`: mic device, source for others, Test buttons; saves on change), **Discord** (optional Client ID), **Manage models** (remote sources CRUD, model registry, add Whisper/remote model), **Selected models** (4 slots: English/Multilingual × Live/Regular). Collapsible headers (collapsed by default). Every setting saves about 400 ms after it changes; there is no Save button.
 
 ## Gotchas
 
@@ -97,5 +97,5 @@ Settings stored in `settings.json` (tauri-plugin-store). Sections: **Recording**
 | `src/components/AiPanel.tsx`, `aiConfig.ts`, `src-tauri/src/ai.rs` | AI prompts: runs the user's CLI command (default `claude -p --tools ""`) with prompt + transcript on stdin; results saved in `ai_outputs` on the project. No provider-specific code |
 | `src/components/Settings.tsx` | Settings UI, remote sources, model registry, slot dropdowns |
 | `src-tauri/src/transcription/engine.rs` | whisper.cpp engine download (`download_engine`) and `WhisperServer` |
-| `src/tasks.ts`, `src/components/TaskBar.tsx` | Long jobs (transcribe, model/engine downloads) go through `runTask`, which maps backend progress events to the bar fixed at the bottom of the window. State lives outside React so it survives tab switches |
+| `src/tasks.ts`, `src/components/TaskBar.tsx` | Long jobs (transcribe, model/engine downloads) go through `runTask`, which maps backend progress events to the bar fixed at the bottom of the window. State lives outside React so it survives tab switches. The bar shows the time left from the average rate since the total became known; the transcribe label names the model(s) |
 | `src/components/EngineSettings.tsx` | CPU/GPU engine download in Settings > Manage models |

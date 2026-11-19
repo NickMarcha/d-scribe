@@ -73,7 +73,7 @@ export function Settings() {
   const [remoteSources, setRemoteSources] = useState<RemoteSource[]>([]);
   const [showInstructions, setShowInstructions] = useState(false);
   const [status, setStatus] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const [modelRegistry, setModelRegistry] = useState<RegistryModel[]>([]);
   const [installedModels, setInstalledModels] = useState<string[]>([]);
@@ -189,29 +189,33 @@ export function Settings() {
       }
 
       await refreshInstalledModels();
+      setLoaded(true);
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
   }
 
-  async function saveSettings() {
-    try {
-      const store = await load(STORE_PATH, { defaults: {}, autoSave: true });
-      await store.set("client_id", clientId);
-      await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
-      await store.set("recent_retention_days", recentRetentionDays);
-      await store.set("auto_record", autoRecord);
-      await store.set("recent_max_gb", recentMaxGb);
-      await store.set("remote_sources", remoteSources);
-      await store.set("model_registry", modelRegistry);
-      await store.set("language_slots", languageSlots);
-      await store.save();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      setStatus(`Save failed: ${e}`);
-    }
-  }
+  // Every change is saved shortly after it's made; there is no Save button to forget.
+  useEffect(() => {
+    if (!loaded) return;
+    const timer = setTimeout(async () => {
+      try {
+        const store = await load(STORE_PATH, { defaults: {}, autoSave: true });
+        await store.set("client_id", clientId);
+        await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
+        await store.set("recent_retention_days", recentRetentionDays);
+        await store.set("auto_record", autoRecord);
+        await store.set("recent_max_gb", recentMaxGb);
+        await store.set("remote_sources", remoteSources);
+        await store.set("model_registry", modelRegistry);
+        await store.set("language_slots", languageSlots);
+        await store.save();
+      } catch (e) {
+        setStatus(`Could not save settings: ${e}`);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [loaded, clientId, segmentMergeBufferMs, recentRetentionDays, autoRecord, recentMaxGb, remoteSources, modelRegistry, languageSlots]);
 
   function addModelToRegistry(model: RegistryModel) {
     if (modelRegistry.some((m) => m.id === model.id)) return;
@@ -403,11 +407,7 @@ export function Settings() {
     <div className="settings">
       <h2>Settings</h2>
 
-      <div className="settings-sticky-bar">
-        <button type="button" className="save-all-btn" onClick={saveSettings}>
-          {saved ? "Saved" : "Save all settings"}
-        </button>
-      </div>
+      <p className="field-hint settings-autosave-note">Changes are saved as you make them.</p>
 
       <div className="settings-sections">
         <section className="settings-section collapsible">
@@ -533,7 +533,6 @@ export function Settings() {
                 <span className="field-hint">
                   Starts d-scribe in the tray when you log in, so automatic recording works without opening it.
                   Closing the window also keeps d-scribe in the tray; use Quit in the tray menu to stop it.
-                  Saved right away.
                 </span>
               </div>
             </div>
@@ -546,7 +545,7 @@ export function Settings() {
             <div className="collapsible-content">
               <p className="field-hint" style={{ marginBottom: "0.75rem" }}>
                 d-scribe records two tracks: your microphone, and everyone else in the call mixed together.
-                Changes here are saved right away and apply to the next recording.
+                Changes apply to the next recording.
               </p>
               <AudioSettings />
             </div>

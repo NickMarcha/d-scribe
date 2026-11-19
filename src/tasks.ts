@@ -9,6 +9,8 @@ export interface Task {
   /** null until known: the bar shows as indeterminate. */
   total: number | null;
   unit: "items" | "bytes";
+  /** When the total became known, and how far along it was then. Used for the time left. */
+  started?: { at: number; done: number };
 }
 
 /** Maps a backend progress event to an update of the task. Return null to ignore the event. */
@@ -25,8 +27,25 @@ function emit() {
 }
 
 function update(id: string, changes: Partial<Task>) {
-  tasks = tasks.map((t) => (t.id === id ? { ...t, ...changes } : t));
+  tasks = tasks.map((t) => {
+    if (t.id !== id) return t;
+    const next = { ...t, ...changes };
+    // Restart the clock when the work being measured changes (e.g. engine download, then segments).
+    if (next.total != null && (next.total !== t.total || next.unit !== t.unit)) {
+      next.started = { at: Date.now(), done: next.done };
+    }
+    return next;
+  });
   emit();
+}
+
+/** Estimated milliseconds left, from the average rate so far. Null until there's enough to go on. */
+export function timeLeftMs(t: Task, now = Date.now()): number | null {
+  if (!t.total || !t.started) return null;
+  const elapsed = now - t.started.at;
+  const progressed = t.done - t.started.done;
+  if (elapsed < 3000 || progressed <= 0) return null;
+  return (elapsed / progressed) * (t.total - t.done);
 }
 
 /**
