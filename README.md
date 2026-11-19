@@ -33,7 +33,7 @@ Windows may say "Windows protected your PC", because the installer isn't signed 
 
 d-scribe reads who is speaking from your Discord app. Discord only allows that for accounts on an app's tester list, so pick one:
 
-- **Use the d-scribe app.** Join the [d-scribe Discord](https://discord.gg/WPvhz8x7SF) and ask in #request-access. Accept the friend request you get from the owner (Discord only allows adding friends as testers), then the invite to the d-scribe app. Leave the Client ID field in Settings empty.
+- **Use the d-scribe app.** Join the [d-scribe Discord](https://discord.gg/WPvhz8x7SF) and ask in a private thread in #request-access. Accept the friend request you get from the owner (Discord only allows adding friends as testers), then the invite to the d-scribe app. Leave the Client ID field in Settings empty.
 - **Use your own Discord app.** No waiting, about five minutes:
   1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
   2. On the **OAuth2** page, turn on **Public Client**, and add `https://localhost` under **Redirects**.
@@ -75,7 +75,7 @@ Settings has buttons to open these folders. Nothing is uploaded unless you set u
 
 - **No speaker names, or no lines after recording.** Lines come from Discord's "who is speaking" events. Check that Settings > **Discord** says connected before the call starts.
 - **Other people are silent in the recording.** Check Settings > **Audio** > **Other people in the call** and use **Test** while someone talks.
-- **Anything else.** Ask in #help on the [d-scribe Discord](https://discord.gg/WPvhz8x7SF) or open an [issue](https://github.com/NickMarcha/d-scribe/issues). Mention your d-scribe version (bottom of Settings) and attach the log file if you can.
+- **Anything else.** Post in the #help forum on the [d-scribe Discord](https://discord.gg/WPvhz8x7SF) or open an [issue](https://github.com/NickMarcha/d-scribe/issues). Mention your d-scribe version (bottom of Settings) and attach the log file if you can.
 
 ## Developing d-scribe
 
@@ -120,7 +120,7 @@ d-scribe/
 
 ### Contributing
 
-Bug reports and ideas are welcome in [issues](https://github.com/NickMarcha/d-scribe/issues) or #feedback on the [Discord](https://discord.gg/WPvhz8x7SF). For bigger code changes, open an issue first so we can agree on the approach.
+Bug reports and ideas are welcome in [issues](https://github.com/NickMarcha/d-scribe/issues) or the #feedback forum on the [Discord](https://discord.gg/WPvhz8x7SF). For bigger code changes, open an issue first so we can agree on the approach.
 
 ### Planned
 
