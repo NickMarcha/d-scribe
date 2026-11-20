@@ -108,6 +108,9 @@ pub struct Engine {
 
 #[derive(serde::Serialize)]
 pub struct GpuDevice {
+    /// What the setting stores: the name, plus " #2", " #3"... when several cards share a name
+    /// (numbered in the engine's order), so two identical cards can be told apart.
+    pub id: String,
     pub name: String,
     /// Shares memory with the CPU (Vulkan's `uma`), i.e. integrated graphics.
     pub integrated: bool,
@@ -148,23 +151,32 @@ fn parse_gpu_devices(text: &str) -> Vec<GpuDevice> {
                 Some((n, _)) if name.ends_with(')') => n,
                 _ => name,
             };
-            devices.push(GpuDevice { name: name.trim().to_string(), integrated: rest.contains("| uma: 1") });
+            devices.push((name.trim().to_string(), rest.contains("| uma: 1")));
         // CUDA: "Device 0: NVIDIA GeForce RTX 3080, compute capability 8.6, ..."
         } else if let Some((_, rest)) = line.strip_prefix("Device ").and_then(|l| l.split_once(": ")) {
             let name = rest.split(',').next().unwrap_or(rest);
-            devices.push(GpuDevice { name: name.trim().to_string(), integrated: false });
+            devices.push((name.trim().to_string(), false));
         }
     }
     devices
+        .iter()
+        .enumerate()
+        .map(|(i, (name, integrated))| {
+            let same = devices.iter().filter(|(n, _)| n == name).count();
+            let nth = devices[..=i].iter().filter(|(n, _)| n == name).count();
+            let id = if same > 1 { format!("{} #{}", name, nth) } else { name.clone() };
+            GpuDevice { id, name: name.clone(), integrated: *integrated }
+        })
+        .collect()
 }
 
-/// Index of the GPU named `wanted` (the setting for this engine; empty = the default GPU).
+/// Index of the GPU with id `wanted` (the setting for this engine; empty = the default GPU).
 /// A saved GPU that's no longer there is an error rather than a silent switch to another card.
 pub fn device_index(kind: EngineKind, engine_dir: &Path, wanted: &str) -> Result<Option<usize>, String> {
     if wanted.is_empty() || kind == EngineKind::Cpu {
         return Ok(None);
     }
-    gpu_devices(engine_dir)?.iter().position(|d| d.name == wanted).map(Some).ok_or_else(|| {
+    gpu_devices(engine_dir)?.iter().position(|d| d.id == wanted).map(Some).ok_or_else(|| {
         format!(
             "The graphics card \"{}\" chosen for the {} engine was not found. Pick another one in Settings > Manage models.",
             wanted,
@@ -177,20 +189,32 @@ pub fn device_index(kind: EngineKind, engine_dir: &Path, wanted: &str) -> Result
 mod tests {
     use super::*;
 
+    fn ids(text: &str) -> Vec<(String, bool)> {
+        parse_gpu_devices(text).into_iter().map(|d| (d.id, d.integrated)).collect()
+    }
+
     #[test]
-    fn parses_vulkan_and_cuda_devices() {
-        let text = "ggml_vulkan: Found 2 Vulkan devices:\n\
-            ggml_vulkan: 0 = NVIDIA GeForce RTX 3080 (NVIDIA) | uma: 0 | fp16: 1\n\
-            ggml_vulkan: 1 = AMD Radeon(TM) Graphics (AMD proprietary driver) | uma: 1 | fp16: 1\n\
-            ggml_cuda_init: found 1 CUDA devices (Total VRAM: 10239 MiB):\n  \
-            Device 0: NVIDIA GeForce RTX 3080, compute capability 8.6, VMM: yes\n\
-            load_backend: loaded CPU backend from x.dll\n";
-        let d = parse_gpu_devices(text);
-        let names: Vec<_> = d.iter().map(|d| (d.name.as_str(), d.integrated)).collect();
+    fn parses_vulkan_devices() {
+        let text = "ggml_vulkan: Found 2 Vulkan devices:
+            ggml_vulkan: 0 = NVIDIA GeForce RTX 3080 (NVIDIA) | uma: 0 | fp16: 1
+            ggml_vulkan: 1 = AMD Radeon(TM) Graphics (AMD proprietary driver) | uma: 1 | fp16: 1
+            load_backend: loaded Vulkan backend from x.dll
+";
         assert_eq!(
-            names,
-            [("NVIDIA GeForce RTX 3080", false), ("AMD Radeon(TM) Graphics", true), ("NVIDIA GeForce RTX 3080", false)]
+            ids(text),
+            [("NVIDIA GeForce RTX 3080".to_string(), false), ("AMD Radeon(TM) Graphics".to_string(), true)]
         );
+    }
+
+    #[test]
+    fn numbers_identical_cuda_devices() {
+        let text = "ggml_cuda_init: found 3 CUDA devices:
+              Device 0: NVIDIA GeForce RTX 3080, compute capability 8.6, VMM: yes
+              Device 1: NVIDIA GeForce RTX 4090, compute capability 8.9, VMM: yes
+              Device 2: NVIDIA GeForce RTX 3080, compute capability 8.6, VMM: yes
+";
+        let got: Vec<String> = ids(text).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(got, ["NVIDIA GeForce RTX 3080 #1", "NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3080 #2"]);
     }
 }
 

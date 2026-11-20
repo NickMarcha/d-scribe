@@ -25,11 +25,13 @@ const ENGINES: { kind: Kind; label: string; size: string }[] = [
 const labelOf = (kind: Kind) => ENGINES.find((e) => e.kind === kind)!.label;
 
 interface GpuDevice {
+  /** The name, plus " #2" etc. when several cards share it. This is what gets saved. */
+  id: string;
   name: string;
   integrated: boolean;
 }
 
-/** Which graphics card a GPU engine runs on. Saved by name as "gpu_device_<kind>"; empty means the engine's default (the first one). */
+/** Which graphics card a GPU engine runs on. Saved by id as "gpu_device_<kind>"; empty means the engine's default (the first one). */
 function GpuChoice({ kind }: { kind: "cuda" | "vulkan" }) {
   const [devices, setDevices] = useState<GpuDevice[] | null>(null);
   const [choice, setChoice] = useState("");
@@ -53,16 +55,16 @@ function GpuChoice({ kind }: { kind: "cuda" | "vulkan" }) {
   if (error) return <span className="field-hint" style={{ color: "var(--danger)" }}>Could not list graphics cards: {error}</span>;
   // Nothing to choose with one card (or none, when the engine falls back to CPU).
   if (!devices || (devices.length < 2 && choice === "")) return null;
-  const label = (d: GpuDevice) => (d.integrated ? `${d.name} (built-in graphics)` : d.name);
+  const label = (d: GpuDevice) => (d.integrated ? `${d.id} (built-in graphics)` : d.id);
 
   return (
     <div style={{ marginTop: "0.5rem" }}>
       <label htmlFor="gpu-choice">Graphics card</label>
       <select id="gpu-choice" value={choice} onChange={(e) => choose(e.target.value)}>
         <option value="">Default ({devices[0] ? label(devices[0]) : "none found"})</option>
-        {choice !== "" && !devices.some((d) => d.name === choice) && <option value={choice}>{choice} (not found)</option>}
-        {devices.map((d, i) => (
-          <option key={i} value={d.name}>
+        {choice !== "" && !devices.some((d) => d.id === choice) && <option value={choice}>{choice} (not found)</option>}
+        {devices.map((d) => (
+          <option key={d.id} value={d.id}>
             {label(d)}
           </option>
         ))}
