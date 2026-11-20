@@ -1,33 +1,115 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { load } from "@tauri-apps/plugin-store";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { runTask, bytesProgress, useTasks } from "../tasks";
+
+type Kind = "cuda" | "vulkan" | "cpu";
 
 interface EngineStatus {
   cpu: boolean;
   cuda: boolean;
+  vulkan: boolean;
   nvidia: boolean;
+  vulkanDriver: boolean;
+  /** The engine transcription will use, or null if the chosen one isn't installed. */
+  active: Kind | null;
 }
 
-/** Downloads the whisper.cpp engine. The GPU build is used whenever it is installed. */
+const ENGINES: { kind: Kind; label: string; size: string }[] = [
+  { kind: "cuda", label: "NVIDIA GPU", size: "650 MB" },
+  { kind: "vulkan", label: "GPU (Vulkan)", size: "19 MB" },
+  { kind: "cpu", label: "CPU", size: "8 MB" },
+];
+
+const labelOf = (kind: Kind) => ENGINES.find((e) => e.kind === kind)!.label;
+
+interface GpuDevice {
+  /** The name, plus " #2" etc. when several cards share it. This is what gets saved. */
+  id: string;
+  name: string;
+  integrated: boolean;
+}
+
+/** Which graphics card a GPU engine runs on. Saved by id as "gpu_device_<kind>"; empty means the engine's default (the first one). */
+function GpuChoice({ kind }: { kind: "cuda" | "vulkan" }) {
+  const [devices, setDevices] = useState<GpuDevice[] | null>(null);
+  const [choice, setChoice] = useState("");
+  const [error, setError] = useState("");
+  const key = `gpu_device_${kind}`;
+
+  useEffect(() => {
+    invoke<GpuDevice[]>("gpu_devices_command", { kind }).then(setDevices).catch((e) => setError(String(e)));
+    load("settings.json", { defaults: {}, autoSave: true }).then(async (store) => {
+      setChoice((await store.get<string>(key)) ?? "");
+    });
+  }, [kind]);
+
+  async function choose(value: string) {
+    setChoice(value);
+    const store = await load("settings.json", { defaults: {}, autoSave: true });
+    await store.set(key, value);
+    await store.save();
+  }
+
+  if (error) return <span className="field-hint" style={{ color: "var(--danger)" }}>Could not list graphics cards: {error}</span>;
+  // Nothing to choose with one card (or none, when the engine falls back to CPU).
+  if (!devices || (devices.length < 2 && choice === "")) return null;
+  const label = (d: GpuDevice) => (d.integrated ? `${d.id} (built-in graphics)` : d.id);
+
+  return (
+    <div style={{ marginTop: "0.5rem" }}>
+      <label htmlFor="gpu-choice">Graphics card</label>
+      <select id="gpu-choice" value={choice} onChange={(e) => choose(e.target.value)}>
+        <option value="">Default ({devices[0] ? label(devices[0]) : "none found"})</option>
+        {choice !== "" && !devices.some((d) => d.id === choice) && <option value={choice}>{choice} (not found)</option>}
+        {devices.map((d) => (
+          <option key={d.id} value={d.id}>
+            {label(d)}
+          </option>
+        ))}
+      </select>
+      <span className="field-hint">
+        Built-in graphics is slower than a separate card but leaves it free for games and uses less power. It
+        applies to the next transcription or recording.
+      </span>
+    </div>
+  );
+}
+
+/** Downloads whisper.cpp engines and picks which one transcribes. Saved as "engine" in settings.json. */
 export function EngineSettings() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
+  const [choice, setChoice] = useState("auto");
   const tasks = useTasks();
-  const downloading = (["cpu", "cuda"] as const).find((k) => tasks.some((t) => t.id === `engine:${k}`)) ?? null;
+  const downloading = ENGINES.find((e) => tasks.some((t) => t.id === `engine:${e.kind}`))?.kind ?? null;
   const [error, setError] = useState("");
 
   function refresh() {
     invoke<EngineStatus>("engine_status_command").then(setEngine).catch((e) => setError(String(e)));
   }
 
-  useEffect(refresh, []);
+  useEffect(() => {
+    refresh();
+    load("settings.json", { defaults: {}, autoSave: true }).then(async (store) => {
+      setChoice((await store.get<string>("engine")) || "auto");
+    });
+  }, []);
 
-  async function download(kind: "cpu" | "cuda") {
+  async function choose(value: string) {
+    setChoice(value);
+    const store = await load("settings.json", { defaults: {}, autoSave: true });
+    await store.set("engine", value);
+    await store.save();
+    refresh();
+  }
+
+  async function download(kind: Kind) {
     setError("");
     try {
       await runTask(
         `engine:${kind}`,
-        kind === "cuda" ? "Downloading the GPU engine" : "Downloading the CPU engine",
+        `Downloading the ${labelOf(kind)} engine`,
         [{ event: "engine-download-progress", map: (p) => (p.kind === kind ? bytesProgress(p) : null) }],
         () => invoke("download_engine_command", { kind }),
       );
@@ -37,9 +119,10 @@ export function EngineSettings() {
     refresh();
   }
 
-  async function remove(kind: "cpu" | "cuda") {
+  async function remove(kind: Kind) {
     try {
       await invoke("remove_engine_command", { kind });
+      if (choice === kind) await choose("auto");
     } catch (e) {
       setError(`Could not remove: ${e}`);
     }
@@ -47,30 +130,47 @@ export function EngineSettings() {
   }
 
   if (!engine) return null;
-  const active = engine.cuda ? "NVIDIA GPU" : engine.cpu ? "CPU" : "none yet";
+  const hasDriver = (kind: Kind) => (kind === "cuda" ? engine.nvidia : kind === "vulkan" ? engine.vulkanDriver : true);
 
   return (
     <div className="form-group">
-      <label>Transcription engine</label>
+      <label htmlFor="engine-choice">Transcription engine</label>
+      <select id="engine-choice" value={choice} onChange={(e) => choose(e.target.value)}>
+        <option value="auto">Automatic (fastest installed)</option>
+        {ENGINES.map((e) => (
+          <option key={e.kind} value={e.kind} disabled={!engine[e.kind] && choice !== e.kind}>
+            {e.label}
+            {engine[e.kind] ? "" : " (not installed)"}
+          </option>
+        ))}
+      </select>
       <span className="field-hint">
-        In use: {active}. The CPU engine (8 MB) downloads by itself the first time you transcribe. On an NVIDIA
-        graphics card, the GPU engine is about 10 times faster with large models. It is a 650 MB download and is
-        used whenever it is installed.
+        {engine.active
+          ? `In use: ${labelOf(engine.active)}.`
+          : choice === "auto"
+            ? "In use: none yet. The CPU engine downloads by itself the first time you transcribe."
+            : `The ${labelOf(choice as Kind)} engine is not installed. Download it below or pick another engine.`}{" "}
+        On a graphics card, transcribing is about 10 times faster with large models. Use the NVIDIA engine on an
+        NVIDIA card and the Vulkan engine on AMD or Intel graphics. If an engine gives errors or wrong text, pick
+        CPU here.
       </span>
+      {(engine.active === "cuda" || engine.active === "vulkan") && <GpuChoice key={engine.active} kind={engine.active} />}
       <div className="button-row" style={{ marginTop: "0.5rem" }}>
-        {!engine.cuda ? (
-          <button type="button" onClick={() => download("cuda")} disabled={downloading != null || !engine.nvidia}>
-            {downloading === "cuda" ? "Downloading GPU engine..." : "Download GPU engine (NVIDIA)"}
-          </button>
-        ) : (
-          <button type="button" onClick={() => remove("cuda")} disabled={downloading != null}>
-            Remove GPU engine
-          </button>
-        )}
-        {!engine.cpu && (
-          <button type="button" onClick={() => download("cpu")} disabled={downloading != null}>
-            {downloading === "cpu" ? "Downloading CPU engine..." : "Download CPU engine"}
-          </button>
+        {ENGINES.map((e) =>
+          engine[e.kind] ? (
+            <button key={e.kind} type="button" onClick={() => remove(e.kind)} disabled={downloading != null}>
+              Remove {e.label} engine
+            </button>
+          ) : (
+            <button
+              key={e.kind}
+              type="button"
+              onClick={() => download(e.kind)}
+              disabled={downloading != null || !hasDriver(e.kind)}
+            >
+              {downloading === e.kind ? `Downloading ${e.label} engine...` : `Download ${e.label} engine (${e.size})`}
+            </button>
+          ),
         )}
         <button
           type="button"
@@ -83,8 +183,14 @@ export function EngineSettings() {
           Open engines folder
         </button>
       </div>
-      {!engine.nvidia && !engine.cuda && (
-        <span className="field-hint">No NVIDIA driver found, so only the CPU engine is available.</span>
+      {(!engine.nvidia || !engine.vulkanDriver) && (
+        <span className="field-hint">
+          {!engine.nvidia && !engine.vulkanDriver
+            ? "No graphics driver with GPU support found, so only the CPU engine is available."
+            : !engine.nvidia
+              ? "No NVIDIA driver found, so the NVIDIA engine is not available."
+              : "No Vulkan driver found, so the Vulkan engine is not available."}
+        </span>
       )}
       {error && <span className="field-hint" style={{ color: "var(--danger)" }}>{error}</span>}
     </div>

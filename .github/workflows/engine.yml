@@ -1,0 +1,128 @@
+name: engine
+
+# Builds the Vulkan engine for the whisper.cpp build pinned in engine.rs (RELEASE), since
+# whisper.cpp doesn't publish one for Windows, and smoke-tests every engine the app downloads.
+#
+# The Vulkan zip goes to the `engine-<RELEASE>` pre-release in this repo (pre-release, so the
+# app updater, the site and #updates ignore it). It's built once per RELEASE: if the zip is
+# already there, the build is skipped. Delete the release to rebuild.
+#
+# After a RELEASE bump: push, let this run, copy the SHA256 values it prints into
+# asset_sha256 in engine.rs, push again. The smoke test fails until they match.
+on:
+  push:
+    paths:
+      - src-tauri/src/transcription/engine.rs
+      - .github/workflows/engine.yml
+      - .github/scripts/engine_check.py
+  workflow_dispatch:
+
+env:
+  VULKAN_SDK_VERSION: 1.4.357.0
+
+jobs:
+  vulkan:
+    runs-on: windows-2025
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release=$(sed -n 's/^const RELEASE: &str = "\(.*\)";/\1/p' src-tauri/src/transcription/engine.rs)
+          [ -n "$release" ] || { echo "::error::RELEASE not found in engine.rs"; exit 1; }
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          if gh release view "engine-$release" --json assets -q '.assets[].name' 2>/dev/null | grep -qx whisper-bin-win-vulkan-x64.zip; then
+            echo "::notice::engine-$release already has the Vulkan zip; not rebuilding."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Vulkan SDK
+        if: steps.check.outputs.build == 'true'
+        run: |
+          curl.exe -o $env:RUNNER_TEMP/VulkanSDK-Installer.exe -L "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_SDK_VERSION}.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_SDK_VERSION}"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_SDK_VERSION}\bin"
+
+      - uses: actions/checkout@v5
+        if: steps.check.outputs.build == 'true'
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ steps.check.outputs.release }}
+          path: whisper.cpp
+
+      # Same options as whisper.cpp's own Windows release build, plus Vulkan. With
+      # GGML_BACKEND_DL each backend is its own DLL, so without a Vulkan driver the
+      # CPU backend still loads.
+      - name: Build
+        if: steps.check.outputs.build == 'true'
+        run: |
+          cmake -S whisper.cpp -B build -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=ON `
+            -DGGML_NATIVE=OFF `
+            -DGGML_BACKEND_DL=ON `
+            -DGGML_CPU_ALL_VARIANTS=ON `
+            -DGGML_VULKAN=ON `
+            -DWHISPER_BUILD_TESTS=OFF `
+            -DWHISPER_SDL2=OFF
+          cmake --build build --config Release -j 4
+
+      - name: Zip
+        if: steps.check.outputs.build == 'true'
+        run: |
+          New-Item -ItemType Directory -Force Release | Out-Null
+          Copy-Item build/bin/Release/whisper-server.exe, build/bin/Release/whisper-cli.exe, build/bin/Release/*.dll Release/
+          Get-ChildItem Release | Format-Table Name, Length
+          Compress-Archive -Path Release -DestinationPath whisper-bin-win-vulkan-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.build == 'true'
+        with:
+          name: whisper-bin-win-vulkan-x64
+          path: whisper-bin-win-vulkan-x64.zip
+          retention-days: 7
+
+      - name: Smoke test before upload (CPU fallback, the runner has no GPU)
+        if: steps.check.outputs.build == 'true'
+        run: python -I .github/scripts/engine_check.py --zip whisper-bin-win-vulkan-x64.zip --work engine-check
+
+      - name: Upload
+        if: steps.check.outputs.build == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE: ${{ steps.check.outputs.release }}
+        run: |
+          tag="engine-$RELEASE"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Transcription engines for whisper.cpp $RELEASE" \
+              --notes "Engines d-scribe downloads that whisper.cpp doesn't publish itself. Built by .github/workflows/engine.yml from whisper.cpp $RELEASE with Vulkan SDK $VULKAN_SDK_VERSION. Not an app release."
+          fi
+          gh release upload "$tag" whisper-bin-win-vulkan-x64.zip
+          echo "Vulkan zip SHA256: $(sha256sum whisper-bin-win-vulkan-x64.zip | cut -d' ' -f1)"
+          echo "Size: $(stat -c %s whisper-bin-win-vulkan-x64.zip) bytes"
+
+  # Downloads each engine the way the app does and checks it against engine.rs.
+  smoke-test:
+    needs: vulkan
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: cpu
+          - kind: vulkan
+          - kind: cuda
+            args: --hash-only
+    steps:
+      - uses: actions/checkout@v5
+      - run: python -I .github/scripts/engine_check.py --kind ${{ matrix.kind }} --work engine-check ${{ matrix.args }}

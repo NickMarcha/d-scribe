@@ -25,9 +25,9 @@ use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use tokio::sync::mpsc;
 use transcription::{
-    download_engine, download_model_with_progress, engine_dir, extract_segment, installed_engine,
+    chosen_engine, device_index, download_engine, download_model_with_progress, engine_dir, extract_segment, gpu_devices,
     is_installed, list_installed_model_names, list_models, resolve_model_path, transcribe_via_api,
-    write_wav_from_samples, EngineKind, RemoteTranscriptionConfig, WhisperServer,
+    remove_old_engines, write_wav_from_samples, EngineKind, Engine, RemoteTranscriptionConfig, WhisperServer,
 };
 
 #[tauri::command]
@@ -245,7 +245,7 @@ fn start_recording(
         });
         let model_path = live_model_path.clone();
         let language_code = live_language_code.clone();
-        let engines_root = paths::engines_dir(&app)?;
+        let app_live = app.clone();
         let server_log = paths::log_file_path(&app)?.with_file_name("whisper-server-live.log");
         let temp_dir = app_data_dir(&app).map(|d| d.join("transcribe_temp")).ok();
 
@@ -266,9 +266,13 @@ fn start_recording(
                 None
             } else {
                 let model = model_path.as_ref().filter(|p| std::path::Path::new(p).exists());
-                match (installed_engine(&engines_root), model) {
-                    (Some((_, dir)), Some(m)) => {
-                        match WhisperServer::start(&dir, std::path::Path::new(m), &server_log).await {
+                match (configured_engine(&app_live), model) {
+                    (Err(e), _) => {
+                        warn!("[live] {}", e);
+                        None
+                    }
+                    (Ok(Some(engine)), Some(m)) => {
+                        match WhisperServer::start(&engine, std::path::Path::new(m), &server_log).await {
                             Ok(s) => Some(s),
                             Err(e) => {
                                 warn!("[live] {}", e);
@@ -276,7 +280,7 @@ fn start_recording(
                             }
                         }
                     }
-                    (None, _) => {
+                    (Ok(None), _) => {
                         warn!("[live] No transcription engine installed. Transcribe once or download it in Settings.");
                         None
                     }
@@ -616,30 +620,64 @@ const SILENCE_RMS: f32 = 100.0;
 /// With an English model set, turns it detects as English at least this confidently keep its text.
 const ENGLISH_THRESHOLD: f32 = 0.5;
 
-/// The installed engine (GPU preferred). Downloads the small CPU engine if none is installed.
-async fn ensure_engine(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+/// A string setting from settings.json, empty if unset.
+fn setting_str(app: &tauri::AppHandle, key: &str) -> String {
+    use tauri_plugin_store::StoreExt;
+    app.store("settings.json")
+        .ok()
+        .and_then(|s| s.get(key))
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default()
+}
+
+/// The engine from the "engine" setting ("auto", "cpu", "cuda" or "vulkan") with the GPU from
+/// "gpu_device_<engine>" (a device name; empty = the engine's default GPU).
+/// Ok(None) on Automatic with nothing installed.
+fn configured_engine(app: &tauri::AppHandle) -> Result<Option<Engine>, String> {
     let root = paths::engines_dir(app)?;
-    if let Some((_, dir)) = installed_engine(&root) {
-        return Ok(dir);
+    let Some((kind, dir)) = chosen_engine(&root, &setting_str(app, "engine"))? else {
+        return Ok(None);
+    };
+    let device = device_index(kind, &dir, &setting_str(app, &format!("gpu_device_{}", kind.name())))?;
+    Ok(Some(Engine { kind, dir, device }))
+}
+
+/// The configured engine. On Automatic with nothing installed, downloads the small CPU engine.
+async fn ensure_engine(app: &tauri::AppHandle) -> Result<Engine, String> {
+    if let Some(engine) = configured_engine(app)? {
+        return Ok(engine);
     }
     let app_emit = app.clone();
-    download_engine(&root, EngineKind::Cpu, move |done, total| {
+    let dir = download_engine(&paths::engines_dir(app)?, EngineKind::Cpu, move |done, total| {
         let _ = app_emit.emit(
             "engine-download-progress",
             serde_json::json!({ "kind": "cpu", "bytesDownloaded": done, "totalBytes": total }),
         );
     })
-    .await
+    .await?;
+    Ok(Engine { kind: EngineKind::Cpu, dir, device: None })
+}
+
+/// GPUs an installed engine can use, for the graphics card choice in Settings.
+#[tauri::command]
+async fn gpu_devices_command(app: tauri::AppHandle, kind: String) -> Result<Vec<transcription::GpuDevice>, String> {
+    let kind = EngineKind::parse(&kind)?;
+    let dir = engine_dir(&paths::engines_dir(&app)?, kind);
+    tauri::async_runtime::spawn_blocking(move || gpu_devices(&dir)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 fn engine_status_command(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let root = paths::engines_dir(&app)?;
-    let nvidia = std::path::Path::new(r"C:\Windows\System32\nvcuda.dll").exists();
+    let system32 = std::path::Path::new(r"C:\Windows\System32");
+    let active = chosen_engine(&root, &setting_str(&app, "engine")).ok().flatten().map(|(k, _)| k.name());
     Ok(serde_json::json!({
         "cpu": is_installed(&root, EngineKind::Cpu),
         "cuda": is_installed(&root, EngineKind::Cuda),
-        "nvidia": nvidia,
+        "vulkan": is_installed(&root, EngineKind::Vulkan),
+        "nvidia": system32.join("nvcuda.dll").exists(),
+        "vulkanDriver": system32.join("vulkan-1.dll").exists(),
+        "active": active,
     }))
 }
 
@@ -648,7 +686,7 @@ async fn download_engine_command(app: tauri::AppHandle, kind: String) -> Result<
     let kind = EngineKind::parse(&kind)?;
     let root = paths::engines_dir(&app)?;
     let app_emit = app.clone();
-    let kind_name = format!("{:?}", kind).to_lowercase();
+    let kind_name = kind.name();
     download_engine(&root, kind, move |done, total| {
         let _ = app_emit.emit(
             "engine-download-progress",
@@ -885,6 +923,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             paths::ensure_directories(app.handle())?;
+            remove_old_engines(&paths::engines_dir(app.handle())?);
             tray::create(app.handle())?;
             // The window starts hidden (tauri.conf.json); show it unless started with Windows.
             if !std::env::args().any(|a| a == tray::MINIMIZED_ARG) {
@@ -956,6 +995,7 @@ pub fn run() {
             list_remote_models_command,
             transcribe_session_command,
             engine_status_command,
+            gpu_devices_command,
             list_audio_devices_command,
             measure_audio_level_command,
             download_engine_command,
