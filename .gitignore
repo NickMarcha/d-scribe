@@ -45,3 +45,4 @@ secrets/
 
 # Claude Code worktrees
 .claude/worktrees/
+__pycache__/
