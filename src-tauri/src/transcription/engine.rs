@@ -66,7 +66,7 @@ impl EngineKind {
         match self {
             Self::Cpu => "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb",
             Self::Cuda => "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a",
-            Self::Vulkan => "VULKAN_SHA256",
+            Self::Vulkan => "97a688c17a574a5b24234064e8b1b9a5c9b33dca4a48977b37005ab29c1741d4",
         }
     }
 }

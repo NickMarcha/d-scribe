@@ -18,7 +18,7 @@ interface EngineStatus {
 
 const ENGINES: { kind: Kind; label: string; size: string }[] = [
   { kind: "cuda", label: "NVIDIA GPU", size: "650 MB" },
-  { kind: "vulkan", label: "GPU (Vulkan)", size: "VULKAN_SIZE" },
+  { kind: "vulkan", label: "GPU (Vulkan)", size: "19 MB" },
   { kind: "cpu", label: "CPU", size: "8 MB" },
 ];
 
