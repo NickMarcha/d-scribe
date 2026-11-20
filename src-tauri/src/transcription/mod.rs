@@ -13,5 +13,5 @@ pub use model_download::{
 pub use remote_api::{list_models, transcribe_via_api, RemoteTranscriptionConfig};
 pub use wav_extract::{extract_segment, rms, write_wav_from_samples};
 pub use engine::{
-    download_engine, engine_dir, installed_engine, is_installed, EngineKind, WhisperServer,
+    chosen_engine, download_engine, engine_dir, is_installed, remove_old_engines, EngineKind, WhisperServer,
 };

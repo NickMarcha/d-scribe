@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Pinned whisper.cpp build. Both zips contain a `Release/` folder with whisper-cli.exe,
-/// whisper-server.exe and the ggml DLLs.
+/// Pinned whisper.cpp build. Every zip contains a `Release/` folder (or the files directly)
+/// with whisper-server.exe and the ggml DLLs. On a bump, the `engine` workflow builds the
+/// Vulkan zip for the new build and prints the SHA256 values for `asset_sha256`.
 const RELEASE: &str = "b5454";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -14,46 +15,114 @@ pub enum EngineKind {
     Cpu,
     /// NVIDIA GPU (CUDA 12.4 runtime included in the zip).
     Cuda,
+    /// Any GPU with a Vulkan driver (AMD, Intel, NVIDIA). Built by this repo's `engine`
+    /// workflow, since whisper.cpp doesn't publish a Windows Vulkan build. Falls back to CPU.
+    Vulkan,
 }
 
 impl EngineKind {
+    /// Order used when the engine setting is "auto": fastest first.
+    pub const ALL: [EngineKind; 3] = [EngineKind::Cuda, EngineKind::Vulkan, EngineKind::Cpu];
+
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "cpu" => Ok(Self::Cpu),
             "cuda" => Ok(Self::Cuda),
+            "vulkan" => Ok(Self::Vulkan),
             _ => Err(format!("Unknown engine: {}", s)),
         }
     }
 
-    fn dir_name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Cpu => "cpu",
             Self::Cuda => "cuda",
+            Self::Vulkan => "vulkan",
         }
     }
 
-    fn asset(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
-            Self::Cpu => "whisper-bin-x64.zip",
-            Self::Cuda => "whisper-bin-win-cuda-12.4.0-x64.zip",
+            Self::Cpu => "CPU",
+            Self::Cuda => "NVIDIA GPU",
+            Self::Vulkan => "GPU (Vulkan)",
+        }
+    }
+
+    fn url(self) -> String {
+        match self {
+            Self::Cpu => format!("https://github.com/ggml-org/whisper.cpp/releases/download/{RELEASE}/whisper-bin-x64.zip"),
+            Self::Cuda => format!(
+                "https://github.com/ggml-org/whisper.cpp/releases/download/{RELEASE}/whisper-bin-win-cuda-12.4.0-x64.zip"
+            ),
+            Self::Vulkan => format!(
+                "https://github.com/NickMarcha/d-scribe/releases/download/engine-{RELEASE}/whisper-bin-win-vulkan-x64.zip"
+            ),
+        }
+    }
+
+    /// SHA256 of the zip for `RELEASE`, checked after download.
+    fn asset_sha256(self) -> &'static str {
+        match self {
+            Self::Cpu => "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb",
+            Self::Cuda => "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a",
+            Self::Vulkan => "VULKAN_SHA256",
         }
     }
 }
 
 pub fn engine_dir(engines_root: &Path, kind: EngineKind) -> PathBuf {
-    engines_root.join(format!("{}-{}", kind.dir_name(), RELEASE))
+    engines_root.join(format!("{}-{}", kind.name(), RELEASE))
 }
 
 pub fn is_installed(engines_root: &Path, kind: EngineKind) -> bool {
     engine_dir(engines_root, kind).join("whisper-server.exe").exists()
 }
 
-/// The GPU engine when installed, otherwise the CPU engine (if installed).
-pub fn installed_engine(engines_root: &Path) -> Option<(EngineKind, PathBuf)> {
-    [EngineKind::Cuda, EngineKind::Cpu]
-        .into_iter()
-        .find(|k| is_installed(engines_root, *k))
-        .map(|k| (k, engine_dir(engines_root, k)))
+/// The engine to run. `choice` is the "engine" setting: "auto" (or empty) picks the fastest
+/// installed engine and returns None when none is installed; a specific engine that isn't
+/// installed is an error, so a broken choice isn't silently replaced by another engine.
+pub fn chosen_engine(engines_root: &Path, choice: &str) -> Result<Option<(EngineKind, PathBuf)>, String> {
+    if choice.is_empty() || choice == "auto" {
+        return Ok(EngineKind::ALL
+            .into_iter()
+            .find(|k| is_installed(engines_root, *k))
+            .map(|k| (k, engine_dir(engines_root, k))));
+    }
+    let kind = EngineKind::parse(choice)?;
+    if !is_installed(engines_root, kind) {
+        return Err(format!(
+            "The {} engine is not installed. Download it in Settings > Manage models, or set the engine to Automatic.",
+            kind.label()
+        ));
+    }
+    Ok(Some((kind, engine_dir(engines_root, kind))))
+}
+
+/// Deletes engines from older pinned builds and leftover downloads. Run at startup, before
+/// anything can be using an engine.
+pub fn remove_old_engines(engines_root: &Path) {
+    let Ok(entries) = std::fs::read_dir(engines_root) else { return };
+    let current: Vec<PathBuf> = EngineKind::ALL.iter().map(|k| engine_dir(engines_root, *k)).collect();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if current.contains(&path) {
+            continue;
+        }
+        let result = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        match result {
+            Ok(()) => log::info!("[engine] Removed old engine file {}", path.display()),
+            Err(e) => log::warn!("[engine] Could not remove {}: {}", path.display(), e),
+        }
+    }
+}
+
+fn file_sha256(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|e| e.to_string())?;
+    Ok(hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 /// Downloads and unpacks an engine. Returns its directory.
@@ -66,13 +135,17 @@ where
         return Ok(dir);
     }
     std::fs::create_dir_all(engines_root).map_err(|e| e.to_string())?;
-    let url = format!(
-        "https://github.com/ggml-org/whisper.cpp/releases/download/{}/{}",
-        RELEASE,
-        kind.asset()
-    );
-    let zip_path = engines_root.join(format!("{}.zip", kind.dir_name()));
-    super::download::download_to_file(&url, &zip_path, on_progress).await?;
+    let zip_path = engines_root.join(format!("{}.zip", kind.name()));
+    super::download::download_to_file(&kind.url(), &zip_path, on_progress).await?;
+    let hash = file_sha256(&zip_path);
+    if hash.as_deref() != Ok(kind.asset_sha256()) {
+        let _ = std::fs::remove_file(&zip_path);
+        return Err(format!(
+            "The downloaded {} engine doesn't match its checksum ({}). Try again.",
+            kind.label(),
+            hash.unwrap_or_else(|e| e)
+        ));
+    }
 
     let tmp_dir = dir.with_extension("part");
     let _ = std::fs::remove_dir_all(&tmp_dir);
