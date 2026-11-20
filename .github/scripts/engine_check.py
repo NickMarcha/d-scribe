@@ -147,6 +147,7 @@ def main():
     ap.add_argument("--work", default="engine-check")
     ap.add_argument("--hash-only", action="store_true")
     args = ap.parse_args()
+    args.work = os.path.abspath(args.work)
     os.makedirs(args.work, exist_ok=True)
     release, urls, hashes = engine_rs()
     problems = []
