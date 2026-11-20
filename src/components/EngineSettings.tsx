@@ -24,6 +24,57 @@ const ENGINES: { kind: Kind; label: string; size: string }[] = [
 
 const labelOf = (kind: Kind) => ENGINES.find((e) => e.kind === kind)!.label;
 
+interface GpuDevice {
+  name: string;
+  integrated: boolean;
+}
+
+/** Which graphics card a GPU engine runs on. Saved by name as "gpu_device_<kind>"; empty means the engine's default (the first one). */
+function GpuChoice({ kind }: { kind: "cuda" | "vulkan" }) {
+  const [devices, setDevices] = useState<GpuDevice[] | null>(null);
+  const [choice, setChoice] = useState("");
+  const [error, setError] = useState("");
+  const key = `gpu_device_${kind}`;
+
+  useEffect(() => {
+    invoke<GpuDevice[]>("gpu_devices_command", { kind }).then(setDevices).catch((e) => setError(String(e)));
+    load("settings.json", { defaults: {}, autoSave: true }).then(async (store) => {
+      setChoice((await store.get<string>(key)) ?? "");
+    });
+  }, [kind]);
+
+  async function choose(value: string) {
+    setChoice(value);
+    const store = await load("settings.json", { defaults: {}, autoSave: true });
+    await store.set(key, value);
+    await store.save();
+  }
+
+  if (error) return <span className="field-hint" style={{ color: "var(--danger)" }}>Could not list graphics cards: {error}</span>;
+  // Nothing to choose with one card (or none, when the engine falls back to CPU).
+  if (!devices || (devices.length < 2 && choice === "")) return null;
+  const label = (d: GpuDevice) => (d.integrated ? `${d.name} (built-in graphics)` : d.name);
+
+  return (
+    <div style={{ marginTop: "0.5rem" }}>
+      <label htmlFor="gpu-choice">Graphics card</label>
+      <select id="gpu-choice" value={choice} onChange={(e) => choose(e.target.value)}>
+        <option value="">Default ({devices[0] ? label(devices[0]) : "none found"})</option>
+        {choice !== "" && !devices.some((d) => d.name === choice) && <option value={choice}>{choice} (not found)</option>}
+        {devices.map((d, i) => (
+          <option key={i} value={d.name}>
+            {label(d)}
+          </option>
+        ))}
+      </select>
+      <span className="field-hint">
+        Built-in graphics is slower than a separate card but leaves it free for games and uses less power. It
+        applies to the next transcription or recording.
+      </span>
+    </div>
+  );
+}
+
 /** Downloads whisper.cpp engines and picks which one transcribes. Saved as "engine" in settings.json. */
 export function EngineSettings() {
   const [engine, setEngine] = useState<EngineStatus | null>(null);
@@ -101,6 +152,7 @@ export function EngineSettings() {
         NVIDIA card and the Vulkan engine on AMD or Intel graphics. If an engine gives errors or wrong text, pick
         CPU here.
       </span>
+      {(engine.active === "cuda" || engine.active === "vulkan") && <GpuChoice key={engine.active} kind={engine.active} />}
       <div className="button-row" style={{ marginTop: "0.5rem" }}>
         {ENGINES.map((e) =>
           engine[e.kind] ? (

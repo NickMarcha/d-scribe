@@ -99,6 +99,101 @@ pub fn chosen_engine(engines_root: &Path, choice: &str) -> Result<Option<(Engine
     Ok(Some((kind, engine_dir(engines_root, kind))))
 }
 
+/// An engine ready to start, with the GPU to run on (whisper-server's `-dev`; None = its default, the first GPU).
+pub struct Engine {
+    pub kind: EngineKind,
+    pub dir: PathBuf,
+    pub device: Option<usize>,
+}
+
+#[derive(serde::Serialize)]
+pub struct GpuDevice {
+    pub name: String,
+    /// Shares memory with the CPU (Vulkan's `uma`), i.e. integrated graphics.
+    pub integrated: bool,
+}
+
+fn hidden_command(exe: &Path) -> Command {
+    let mut cmd = Command::new(exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// The GPUs an engine can use, in its own order, so the index is the `-dev` value. Read from
+/// what `whisper-server --help` prints while loading its backends. Empty for the CPU engine.
+pub fn gpu_devices(engine_dir: &Path) -> Result<Vec<GpuDevice>, String> {
+    let out = hidden_command(&engine_dir.join("whisper-server.exe"))
+        .current_dir(engine_dir)
+        .arg("--help")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Could not start whisper-server: {}", e))?;
+    let text = String::from_utf8_lossy(&out.stderr) + String::from_utf8_lossy(&out.stdout);
+    Ok(parse_gpu_devices(&text))
+}
+
+fn parse_gpu_devices(text: &str) -> Vec<GpuDevice> {
+    let mut devices = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        // Vulkan: "ggml_vulkan: 0 = AMD Radeon(TM) Graphics (AMD proprietary driver) | uma: 1 | ..."
+        if let Some((_, rest)) = line.strip_prefix("ggml_vulkan: ").and_then(|l| l.split_once(" = ")) {
+            let name = rest.split(" | ").next().unwrap_or(rest);
+            let name = match name.rsplit_once(" (") {
+                Some((n, _)) if name.ends_with(')') => n,
+                _ => name,
+            };
+            devices.push(GpuDevice { name: name.trim().to_string(), integrated: rest.contains("| uma: 1") });
+        // CUDA: "Device 0: NVIDIA GeForce RTX 3080, compute capability 8.6, ..."
+        } else if let Some((_, rest)) = line.strip_prefix("Device ").and_then(|l| l.split_once(": ")) {
+            let name = rest.split(',').next().unwrap_or(rest);
+            devices.push(GpuDevice { name: name.trim().to_string(), integrated: false });
+        }
+    }
+    devices
+}
+
+/// Index of the GPU named `wanted` (the setting for this engine; empty = the default GPU).
+/// A saved GPU that's no longer there is an error rather than a silent switch to another card.
+pub fn device_index(kind: EngineKind, engine_dir: &Path, wanted: &str) -> Result<Option<usize>, String> {
+    if wanted.is_empty() || kind == EngineKind::Cpu {
+        return Ok(None);
+    }
+    gpu_devices(engine_dir)?.iter().position(|d| d.name == wanted).map(Some).ok_or_else(|| {
+        format!(
+            "The graphics card \"{}\" chosen for the {} engine was not found. Pick another one in Settings > Manage models.",
+            wanted,
+            kind.label()
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_vulkan_and_cuda_devices() {
+        let text = "ggml_vulkan: Found 2 Vulkan devices:\n\
+            ggml_vulkan: 0 = NVIDIA GeForce RTX 3080 (NVIDIA) | uma: 0 | fp16: 1\n\
+            ggml_vulkan: 1 = AMD Radeon(TM) Graphics (AMD proprietary driver) | uma: 1 | fp16: 1\n\
+            ggml_cuda_init: found 1 CUDA devices (Total VRAM: 10239 MiB):\n  \
+            Device 0: NVIDIA GeForce RTX 3080, compute capability 8.6, VMM: yes\n\
+            load_backend: loaded CPU backend from x.dll\n";
+        let d = parse_gpu_devices(text);
+        let names: Vec<_> = d.iter().map(|d| (d.name.as_str(), d.integrated)).collect();
+        assert_eq!(
+            names,
+            [("NVIDIA GeForce RTX 3080", false), ("AMD Radeon(TM) Graphics", true), ("NVIDIA GeForce RTX 3080", false)]
+        );
+    }
+}
+
 /// Deletes engines from older pinned builds and leftover downloads. Run at startup, before
 /// anything can be using an engine.
 pub fn remove_old_engines(engines_root: &Path) {
@@ -193,25 +288,22 @@ pub struct WhisperServer {
 }
 
 impl WhisperServer {
-    pub async fn start(engine_dir: &Path, model: &Path, log_path: &Path) -> Result<Self, String> {
+    pub async fn start(engine: &Engine, model: &Path, log_path: &Path) -> Result<Self, String> {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .and_then(|l| l.local_addr())
             .map_err(|e| e.to_string())?
             .port();
         let log = std::fs::File::create(log_path).map_err(|e| e.to_string())?;
-        let mut cmd = Command::new(engine_dir.join("whisper-server.exe"));
-        cmd.current_dir(engine_dir)
-            .args(["--host", "127.0.0.1", "--port", &port.to_string(), "-bs", "5", "-m"])
+        let mut cmd = hidden_command(&engine.dir.join("whisper-server.exe"));
+        cmd.current_dir(&engine.dir).args(["--host", "127.0.0.1", "--port", &port.to_string(), "-bs", "5"]);
+        if let Some(device) = engine.device {
+            cmd.args(["-dev", &device.to_string()]);
+        }
+        cmd.arg("-m")
             .arg(model)
             .stdin(Stdio::null())
             .stdout(log.try_clone().map_err(|e| e.to_string())?)
             .stderr(log);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
         let child = cmd.spawn().map_err(|e| format!("Could not start whisper-server: {}", e))?;
         let mut server = Self {
             child,
@@ -235,7 +327,13 @@ impl WhisperServer {
             }
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
-        log::info!("[transcribe] whisper-server ready on {} with {}", server.base_url, model.display());
+        log::info!(
+            "[transcribe] whisper-server ready on {} with {} ({} engine, GPU {})",
+            server.base_url,
+            model.display(),
+            engine.kind.label(),
+            engine.device.map_or("default".to_string(), |d| d.to_string())
+        );
         Ok(server)
     }
 
