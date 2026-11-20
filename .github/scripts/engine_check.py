@@ -99,13 +99,15 @@ def run(engine_dir, model, wav):
         deadline = time.time() + 180
         while True:
             if proc.poll() is not None:
-                return [f"whisper-server exited with {proc.returncode} while loading"]
+                problems.append(f"whisper-server exited with {proc.returncode} while loading")
+                return problems
             try:
                 urllib.request.urlopen(base, timeout=2)
                 break
             except Exception:
                 if time.time() > deadline:
-                    return ["whisper-server did not start within 3 minutes"]
+                    problems.append("whisper-server did not start within 3 minutes")
+                    return problems
                 time.sleep(0.5)
         body, ctype = multipart({"language": "auto", "response_format": "verbose_json"}, "jfk.wav", open(wav, "rb").read())
         req = urllib.request.Request(base + "/inference", data=body, headers={"Content-Type": ctype})
@@ -134,7 +136,7 @@ def run(engine_dir, model, wav):
         backends = [l for l in lines if re.search(r"vulkan|ggml_vk|load_backend|CUDA|using device|no GPU", l, re.I)]
         print("Backend lines from the server log:\n  " + "\n  ".join(backends[:15] or ["(none)"]))
         if problems:
-            print("Last lines of the server log:\n  " + "\n  ".join(lines[-15:]))
+            print("Last lines of the server log:\n  " + "\n  ".join(lines[-40:]))
     return problems
 
 

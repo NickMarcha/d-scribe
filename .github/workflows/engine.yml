@@ -83,6 +83,13 @@ jobs:
           Get-ChildItem Release | Format-Table Name, Length
           Compress-Archive -Path Release -DestinationPath whisper-bin-win-vulkan-x64.zip
 
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.build == 'true'
+        with:
+          name: whisper-bin-win-vulkan-x64
+          path: whisper-bin-win-vulkan-x64.zip
+          retention-days: 7
+
       - name: Smoke test before upload (CPU fallback, the runner has no GPU)
         if: steps.check.outputs.build == 'true'
         run: python -I .github/scripts/engine_check.py --zip whisper-bin-win-vulkan-x64.zip --work engine-check
