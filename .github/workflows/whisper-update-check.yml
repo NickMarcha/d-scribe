@@ -1,0 +1,44 @@
+name: whisper-update-check
+
+# Weekly: if whisper.cpp has a numbered release (v1.x.y) newer than the build pinned in
+# engine.rs, open an issue (or update the open one). b#### builds in between are ignored.
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: src-tauri/src/transcription/engine.rs
+          sparse-checkout-cone-mode: false
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pinned=$(sed -n 's/^const RELEASE: &str = "\(.*\)";/\1/p' src-tauri/src/transcription/engine.rs)
+          [ -n "$pinned" ] || { echo "::error::RELEASE not found in engine.rs"; exit 1; }
+          latest=$(gh release list -R ggml-org/whisper.cpp --exclude-pre-releases -L 20 --json tagName \
+            -q '[.[] | select(.tagName | test("^v[0-9]"))][0].tagName')
+          # "ahead" means the latest release has commits our pinned build doesn't.
+          status=$(gh api "repos/ggml-org/whisper.cpp/compare/$pinned...$latest" -q .status)
+          echo "Pinned $pinned, latest $latest: $status"
+          [ "$status" = "ahead" ] || exit 0
+
+          title="whisper.cpp $latest is out (we pin $pinned)"
+          body="whisper.cpp [$latest](https://github.com/ggml-org/whisper.cpp/releases/tag/$latest) has changes that our pinned build \`$pinned\` (\`RELEASE\` in \`src-tauri/src/transcription/engine.rs\`) doesn't.
+
+          Updating is optional. To update: set \`RELEASE\` to the \`b####\` build released with $latest, push, let the \`engine\` workflow build the Vulkan zip, then copy the SHA256 values it prints into \`engine.rs\`. Ask a tester with an AMD or Intel GPU to try the Vulkan engine before releasing."
+          existing=$(gh issue list --state open --search "whisper.cpp in:title \"is out (we pin\"" --json number -q '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
