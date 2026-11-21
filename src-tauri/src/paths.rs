@@ -35,7 +35,8 @@ pub fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Get the path to the Discord tokens file (for refresh token persistence).
 pub fn discord_tokens_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_dir(app)?.join("discord_tokens.json"))
+    let name = if crate::discord_rpc::fake::active() { "discord_tokens.fake.json" } else { "discord_tokens.json" };
+    Ok(app_data_dir(app)?.join(name))
 }
 
 /// Get the log file path (e.g. %APPDATA%/d-scribe/logs/d-scribe.log on Windows).

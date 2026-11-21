@@ -51,6 +51,10 @@ Windows is the only system with working backends. Everything tied to a system si
 - **Small things** use `#[cfg]` in place: `ai.rs` runs the AI command through `cmd /C` or `sh -c`, `hidden_command` hides console windows on Windows. Paths come from Tauri and `dirs` (`%APPDATA%\d-scribe`, `~/.local/share/d-scribe`).
 - Still Windows-worded in the UI: "Windows default" in Audio settings, "Start with Windows".
 
+## Fake Discord
+
+`tools/fake-discord` stands in for the Discord desktop app (see its README): the IPC protocol d-scribe uses, the token and guilds HTTP endpoints, and scenario files with people joining, talking (WAV clips or `--tones`) and leaving. Run it, then start d-scribe with `DSCRIBE_DISCORD_IPC` and `DSCRIBE_DISCORD_API` set (it prints both; `discord_rpc/fake.rs` reads them). With either set, the login is kept in `discord_tokens.fake.json`. The Rust tests use it as a library: `client.rs` signs in against it over an in-memory stream with the token exchange on its HTTP server, `ipc/mod.rs` connects to it on a real named pipe. Its framing is written separately from d-scribe's on purpose. When real Discord behaves differently, fix the fake and add a test in `tools/fake-discord/tests/protocol.rs`.
+
 ## Shared state
 
 Screens unmount (Settings on tab switch, Manage models on collapse, the AI panel on view switch) while their jobs keep running, so nothing a job finishes into may live in a component:

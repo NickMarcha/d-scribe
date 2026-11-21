@@ -2,6 +2,7 @@
 
 mod client;
 mod events;
+pub mod fake;
 mod token_store;
 
 mod ipc;

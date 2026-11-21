@@ -879,6 +879,7 @@ fn init_logger() -> Result<std::path::PathBuf, fern::InitError> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _log_path = init_logger().ok();
+    discord_rpc::fake::log_if_active();
 
     tauri::Builder::default()
         // Must be first: a second launch (e.g. from the Start menu while in the tray) shows this

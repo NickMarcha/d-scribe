@@ -20,7 +20,6 @@ use log::info;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub use backend::discord_running;
 
 const OPCODE_HANDSHAKE: u32 = 0;
 pub const OPCODE_FRAME: u32 = 1;
@@ -32,11 +31,23 @@ pub const OPCODE_PONG: u32 = 4;
 pub trait IpcStream: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T: AsyncRead + AsyncWrite + Send + Unpin> IpcStream for T {}
 
-/// Connect to the running Discord app and send the handshake.
+/// Connect to the running Discord app (or the fake set in `DSCRIBE_DISCORD_IPC`) and send
+/// the handshake.
 pub async fn connect_ipc(client_id: &str) -> Result<(IpcReader, IpcWriter), String> {
-    let (name, stream) = backend::connect().await?;
+    let (name, stream) = match super::fake::ipc_path() {
+        Some(path) => (path.clone(), backend::connect_to(&path).await?),
+        None => backend::connect().await?,
+    };
     info!("[discord-rpc] IPC connected to {}", name);
     handshake(Box::new(stream), client_id).await
+}
+
+/// Whether Discord (or the fake) is running, without connecting to it.
+pub fn discord_running() -> bool {
+    match super::fake::ipc_path() {
+        Some(path) => backend::exists(&path),
+        None => backend::discord_running(),
+    }
 }
 
 /// Send the handshake on an open connection and split it into its read and write halves.
@@ -143,6 +154,30 @@ mod tests {
         write_frame(&mut discord, OPCODE_FRAME, "{\"evt\":\"ünïcode\"}").await.unwrap();
         assert_eq!(reader.recv_frame().await.unwrap(), Some((OPCODE_PING, "{}".into())));
         assert_eq!(reader.recv_frame().await.unwrap(), Some((OPCODE_FRAME, "{\"evt\":\"ünïcode\"}".into())));
+    }
+
+    /// The `DSCRIBE_DISCORD_IPC` switch, end to end: the fake on a real named pipe.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn connects_to_the_fake_on_a_named_pipe() {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let pipe = format!(r"\\.\pipe\d-scribe-test-{}", uuid::Uuid::new_v4());
+        std::env::set_var("DSCRIBE_DISCORD_IPC", &pipe);
+        assert!(!discord_running(), "no pipe yet");
+
+        let fake = fake_discord::FakeDiscord::new(Default::default());
+        let server = ServerOptions::new().first_pipe_instance(true).create(&pipe).unwrap();
+        assert!(discord_running(), "the pipe is listed");
+        tokio::spawn(async move {
+            server.connect().await.unwrap();
+            fake.serve(server).await;
+        });
+
+        let (mut reader, _writer) = connect_ipc("42").await.unwrap();
+        let (opcode, ready) = reader.recv_frame().await.unwrap().unwrap();
+        assert_eq!(opcode, OPCODE_FRAME);
+        assert!(ready.contains("\"READY\""), "{}", ready);
+        std::env::remove_var("DSCRIBE_DISCORD_IPC");
     }
 
     #[tokio::test]

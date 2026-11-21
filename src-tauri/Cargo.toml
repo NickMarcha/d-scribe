@@ -60,3 +60,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 
+
+[dev-dependencies]
+# The fake Discord app in tools/, without audio playback.
+fake-discord = { path = "../tools/fake-discord", default-features = false }

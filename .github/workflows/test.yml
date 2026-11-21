@@ -39,7 +39,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev libasound2-dev
 
       - uses: actions/setup-node@v5
         with:
@@ -49,7 +49,9 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            tools/fake-discord
 
       # The Tauri context embeds the built frontend.
       - run: npm ci && npx vite build
@@ -57,3 +59,7 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --features transcription-whisper-cli
+
+      - name: fake Discord
+        working-directory: tools/fake-discord
+        run: cargo test

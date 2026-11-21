@@ -1,0 +1,17 @@
+{
+  "guilds": { "300": "Fake server" },
+  "timeline": [
+    {
+      "at": 0,
+      "do": "join",
+      "channel": {
+        "id": "301",
+        "name": "General",
+        "guild_id": "300",
+        "members": [{ "id": "201", "username": "alice", "nick": "Alice" }]
+      }
+    },
+    { "at": 8, "do": "speak", "user": "201", "seconds": 2 },
+    { "at": 12, "do": "close" }
+  ]
+}
