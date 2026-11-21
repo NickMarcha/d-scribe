@@ -1,0 +1,12 @@
+{
+  "timeline": [
+    {
+      "at": 0,
+      "do": "join",
+      "channel": { "id": "401", "type": 1, "members": [{ "id": "201", "username": "alice", "nick": "Alice" }] }
+    },
+    { "at": 8, "do": "speak", "user": "201", "seconds": 4 },
+    { "at": 14, "do": "speak", "user": "201", "seconds": 2 },
+    { "at": 20, "do": "remove_member", "id": "201" }
+  ]
+}

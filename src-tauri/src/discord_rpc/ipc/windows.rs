@@ -30,6 +30,21 @@ pub async fn connect() -> Result<(String, NamedPipeClient), String> {
     Err("Could not connect to Discord. Is the Discord desktop app running?".into())
 }
 
+/// Opens a given pipe, e.g. `\\.\pipe\d-scribe-fake-discord`.
+pub async fn connect_to(pipe_name: &str) -> Result<NamedPipeClient, String> {
+    open_pipe(pipe_name)
+        .await
+        .map_err(|e| format!("Could not connect to {}: {}", pipe_name, e))
+}
+
+/// Whether a pipe exists, by listing the pipe namespace (opening it would use up a connection).
+pub fn exists(pipe_name: &str) -> bool {
+    let Some(name) = pipe_name.strip_prefix(r"\\.\pipe\") else { return false };
+    std::fs::read_dir(r"\\.\pipe\")
+        .map(|entries| entries.flatten().any(|e| e.file_name().to_str() == Some(name)))
+        .unwrap_or(false)
+}
+
 /// Discord desktop is running if one of its IPC pipes (discord-ipc-0..9) exists.
 /// Lists the pipe namespace instead of opening pipes, so no connection is made.
 pub fn discord_running() -> bool {

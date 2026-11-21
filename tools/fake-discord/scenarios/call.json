@@ -1,0 +1,30 @@
+{
+  "user": { "id": "100", "username": "you" },
+  "guilds": { "300": "Fake server" },
+  "timeline": [
+    {
+      "at": 0,
+      "do": "join",
+      "channel": {
+        "id": "301",
+        "name": "General",
+        "guild_id": "300",
+        "type": 2,
+        "members": [
+          { "id": "201", "username": "alice", "nick": "Alice" },
+          { "id": "202", "username": "bob" }
+        ]
+      }
+    },
+    { "at": 8, "do": "speak", "user": "201", "seconds": 3 },
+    { "at": 12, "do": "speak", "user": "202", "seconds": 2 },
+    { "at": 13.5, "do": "speak", "user": "201", "seconds": 0.4 },
+    { "at": 16, "do": "speak", "user": "201", "seconds": 2 },
+    { "at": 16.5, "do": "speak", "user": "202", "seconds": 2 },
+    { "at": 20, "do": "add_member", "member": { "id": "203", "username": "carol", "nick": "Carol" } },
+    { "at": 22, "do": "speak", "user": "203", "seconds": 3 },
+    { "at": 27, "do": "remove_member", "id": "202" },
+    { "at": 28, "do": "speak", "user": "201", "seconds": 2 },
+    { "at": 33, "do": "leave" }
+  ]
+}

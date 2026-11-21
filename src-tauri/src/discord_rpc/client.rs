@@ -29,7 +29,6 @@ pub const OAUTH_SCOPES: &[&str] = &["rpc", "identify"];
 /// in the Discord app.
 pub const OAUTH_REDIRECT_URI: &str = "https://localhost";
 
-const TOKEN_URL: &str = "https://discord.com/api/oauth2/token";
 
 fn has_scope(scope: &str) -> bool {
     OAUTH_SCOPES.contains(&scope)
@@ -70,7 +69,7 @@ impl Pkce {
 
 async fn post_token(form: &[(&str, &str)]) -> Result<TokenSet, String> {
     let response = reqwest::Client::new()
-        .post(TOKEN_URL)
+        .post(format!("{}/oauth2/token", crate::discord_rpc::fake::api_base()))
         .form(form)
         .send()
         .await
@@ -218,7 +217,6 @@ mod connection {
     const GUILD_RETRY_DELAY: Duration = Duration::from_secs(30);
     const SPEAKING_EVENTS: [&str; 2] = ["SPEAKING_START", "SPEAKING_STOP"];
     const RPC_ERROR_OAUTH2: i64 = 5000;
-    const USER_GUILDS_URL: &str = "https://discord.com/api/v10/users/@me/guilds";
 
     // ---- Single active connection ----
 
@@ -499,7 +497,7 @@ mod connection {
 
     async fn fetch_user_guilds(access_token: &str) -> Result<HashMap<String, String>, String> {
         let response = reqwest::Client::new()
-            .get(USER_GUILDS_URL)
+            .get(format!("{}/v10/users/@me/guilds", crate::discord_rpc::fake::api_base()))
             .bearer_auth(access_token)
             .send()
             .await
@@ -849,129 +847,107 @@ mod connection {
 
 #[cfg(test)]
 mod tests {
-    //! Runs the real connection against a fake Discord on an in-memory stream, so the protocol
-    //! is checked the same way on every system.
+    //! Runs the real connection against tools/fake-discord on an in-memory stream, with the
+    //! token exchange going to the fake's HTTP endpoint.
 
     use super::*;
-    use crate::discord_rpc::ipc::{handshake, read_frame, write_frame, OPCODE_FRAME, OPCODE_PING, OPCODE_PONG};
+    use crate::discord_rpc::ipc::handshake;
     use crate::discord_rpc::{get_channel_info, is_rpc_connected};
-    use serde_json::{json, Value};
-    use tokio::io::DuplexStream;
+    use fake_discord::scenario::{Action, Channel, Member, Scenario};
+    use fake_discord::FakeDiscord;
+    use std::sync::Arc;
+    use std::time::Duration;
 
-    async fn send(discord: &mut DuplexStream, payload: Value) {
-        write_frame(discord, OPCODE_FRAME, &payload.to_string()).await.unwrap();
-    }
-
-    async fn recv(discord: &mut DuplexStream) -> Option<Value> {
-        loop {
-            let (opcode, text) = read_frame(discord).await.unwrap()?;
-            if opcode == OPCODE_FRAME {
-                return Some(serde_json::from_str(&text).unwrap());
-            }
-        }
-    }
-
-    fn reply(request: &Value, data: Value) -> Value {
-        json!({ "cmd": request["cmd"], "nonce": request["nonce"], "evt": request["evt"], "data": data })
-    }
-
-    fn channel() -> Value {
-        json!({
-            "id": "c1", "name": "General", "guild_id": "g1", "type": 2,
-            "voice_states": [
-                { "nick": "Bob", "user": { "id": "2", "username": "bob" } },
-                { "user": { "id": "1", "username": "me" } }
-            ]
-        })
-    }
-
-    /// Answers like Discord does for an approved app that is in `channel()`. After both
-    /// SPEAKING subscriptions it pings and sends a SPEAKING_START for Bob, then waits.
-    async fn fake_discord(mut discord: DuplexStream, authenticate_error: bool) -> Vec<String> {
-        let mut commands = Vec::new();
-        let (opcode, hello) = read_frame(&mut discord).await.unwrap().unwrap();
-        assert_eq!(opcode, 0);
-        assert_eq!(serde_json::from_str::<Value>(&hello).unwrap()["client_id"], "42");
-        send(&mut discord, json!({ "cmd": "DISPATCH", "evt": "READY", "data": { "v": 1 } })).await;
-
-        let mut subscribed = 0;
-        while let Some(req) = recv(&mut discord).await {
-            let cmd = req["cmd"].as_str().unwrap().to_string();
-            commands.push(match req["evt"].as_str() {
-                Some(evt) => format!("{} {}", cmd, evt),
-                None => cmd.clone(),
-            });
-            let response = match cmd.as_str() {
-                "AUTHENTICATE" if authenticate_error => {
-                    let mut r = reply(&req, json!({ "code": 4009, "message": "Invalid access token" }));
-                    r["evt"] = json!("ERROR");
-                    r
-                }
-                "AUTHENTICATE" => {
-                    assert_eq!(req["args"]["access_token"], "token");
-                    reply(&req, json!({ "user": { "id": "1" } }))
-                }
-                "GET_SELECTED_VOICE_CHANNEL" => reply(&req, channel()),
-                "GET_GUILD" => reply(&req, json!({ "id": "g1", "name": "Server" })),
-                "SUBSCRIBE" => {
-                    subscribed += 1;
-                    reply(&req, json!({ "evt": req["evt"] }))
-                }
-                other => panic!("unexpected command {}", other),
-            };
-            send(&mut discord, response).await;
-            if subscribed == 2 {
-                subscribed = 0;
-                write_frame(&mut discord, OPCODE_PING, "{\"p\":1}").await.unwrap();
-                let (opcode, text) = read_frame(&mut discord).await.unwrap().unwrap();
-                assert_eq!((opcode, text.as_str()), (OPCODE_PONG, "{\"p\":1}"));
-                send(&mut discord, json!({ "cmd": "DISPATCH", "evt": "SPEAKING_START", "data": { "user_id": "2" } })).await;
-            }
-        }
-        commands
-    }
-
-    async fn connect(authenticate_error: bool) -> (Result<Option<String>, String>, mpsc::UnboundedReceiver<SpeakingEvent>, tokio::task::JoinHandle<Vec<String>>) {
+    async fn connect(
+        fake: &Arc<FakeDiscord>,
+        access_token: Option<String>,
+    ) -> (Result<Option<String>, String>, mpsc::UnboundedReceiver<SpeakingEvent>) {
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
-        let discord = tokio::spawn(fake_discord(theirs, authenticate_error));
-        let client = DiscordRpcClient::new("42".into());
+        tokio::spawn(fake.clone().serve(theirs));
         let (tx, rx) = mpsc::unbounded_channel();
         let generation = connection::begin_generation();
         let (reader, writer) = handshake(Box::new(ours), "42").await.unwrap();
-        let result = client.run_on(generation, reader, writer, tx, Some("token".into())).await;
-        (result, rx, discord)
+        let result = DiscordRpcClient::new("42".into()).run_on(generation, reader, writer, tx, access_token).await;
+        (result, rx)
     }
 
-    // One test, since the connection state is global.
+    async fn next_event(rx: &mut mpsc::UnboundedReceiver<SpeakingEvent>) -> SpeakingEvent {
+        tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("no speaking event").unwrap()
+    }
+
+    // One test, since the connection state and the API override are global.
     #[tokio::test]
-    async fn connects_tracks_the_channel_and_forwards_speaking() {
-        let (result, mut rx, discord) = connect(false).await;
-        assert_eq!(result, Ok(None), "no new refresh token when connecting with an access token");
+    async fn signs_in_tracks_the_channel_and_forwards_speaking() {
+        let fake = FakeDiscord::new(Scenario {
+            guilds: [("300".to_string(), "Fake server".to_string())].into(),
+            ..Scenario::default()
+        });
+        let http = fake.serve_http("127.0.0.1:0").unwrap();
+        std::env::set_var("DSCRIBE_DISCORD_API", format!("http://{}", http));
+        fake.apply(Action::Join {
+            channel: Channel {
+                id: "301".into(),
+                name: Some("General".into()),
+                guild_id: Some("300".into()),
+                kind: 2,
+                members: vec![
+                    Member { id: "201".into(), username: "alice".into(), nick: Some("Alice".into()) },
+                    Member { id: "202".into(), username: "bob".into(), nick: None },
+                ],
+            },
+        });
+
+        // First connect: popup approval, code exchange with PKCE, AUTHENTICATE.
+        let (result, mut rx) = connect(&fake, None).await;
+        let refresh = result.unwrap().expect("a refresh token to save");
+        assert!(is_rpc_connected());
+        let info = get_channel_info().expect("channel info is published");
+        assert_eq!(info.channel_id, "301");
+        assert_eq!(info.channel_name.as_deref(), Some("General"));
+        assert_eq!(info.guild_name.as_deref(), Some("Fake server"));
+        assert_eq!(info.channel_type, Some(2));
+        assert_eq!(info.self_user_id.as_deref(), Some("100"));
+        assert_eq!(info.user_labels.len(), 3, "everyone in the call, including you");
+        assert_eq!(info.user_labels.get("201").map(String::as_str), Some("Alice"));
+        assert_eq!(info.user_labels.get("202").map(String::as_str), Some("bob"));
+
+        fake.apply(Action::Speak { user: "201".into(), seconds: Some(0.05), wav: None });
+        assert!(matches!(next_event(&mut rx).await, SpeakingEvent::Start { ref user_id } if user_id == "201"));
+        assert!(matches!(next_event(&mut rx).await, SpeakingEvent::Stop { ref user_id } if user_id == "201"));
+
+        // Auto-reconnect: refresh (Discord rotates the token), then connect without a popup.
+        let client = DiscordRpcClient::new("42".into());
+        let (access, rotated) = client.refresh_tokens(&refresh).await.unwrap();
+        assert_ne!(rotated, refresh);
+        assert!(client.refresh_tokens(&refresh).await.is_err(), "an old refresh token is refused");
+        let (result, _rx) = connect(&fake, Some(access)).await;
+        assert_eq!(result, Ok(None));
         assert!(is_rpc_connected());
 
-        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        assert!(matches!(event, SpeakingEvent::Start { ref user_id } if user_id == "2"), "{:?}", event);
-
-        let info = get_channel_info().expect("channel info is published");
-        assert_eq!(info.channel_id, "c1");
-        assert_eq!(info.channel_name.as_deref(), Some("General"));
-        assert_eq!(info.guild_name.as_deref(), Some("Server"));
-        assert_eq!(info.channel_type, Some(2));
-        assert_eq!(info.self_user_id.as_deref(), Some("1"));
-        assert_eq!(info.user_labels.get("2").map(String::as_str), Some("Bob"));
-        assert_eq!(info.user_labels.get("1").map(String::as_str), Some("me"));
-
-        // A new connection replaces this one (closing it), and a rejected token fails it.
-        let (result, _rx, _discord2) = connect(true).await;
-        let err = result.unwrap_err();
+        // A revoked login and a cancelled popup fail with messages the user can act on.
+        fake.set_reject_tokens(true);
+        let err = connect(&fake, Some("fake-access-1".into())).await.0.unwrap_err();
         assert!(err.starts_with("Discord rejected the access token: Invalid access token (code 4009)"), "{}", err);
         assert!(!is_rpc_connected());
         assert!(get_channel_info().is_none());
+        fake.set_reject_tokens(false);
+        fake.set_deny_authorize(true);
+        let err = connect(&fake, None).await.0.unwrap_err();
+        assert!(err.starts_with("Authorization was cancelled."), "{}", err);
 
-        let commands = discord.await.unwrap();
+        let commands = fake.commands();
         assert_eq!(
-            commands,
-            ["AUTHENTICATE", "GET_SELECTED_VOICE_CHANNEL", "GET_GUILD", "SUBSCRIBE SPEAKING_START", "SUBSCRIBE SPEAKING_STOP"]
+            commands[..7],
+            [
+                "AUTHORIZE",
+                "AUTHENTICATE",
+                "GET_SELECTED_VOICE_CHANNEL",
+                "GET_GUILD",
+                "SUBSCRIBE SPEAKING_START",
+                "SUBSCRIBE SPEAKING_STOP",
+                "AUTHENTICATE"
+            ]
         );
+        std::env::remove_var("DSCRIBE_DISCORD_API");
     }
 }

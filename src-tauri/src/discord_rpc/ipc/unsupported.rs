@@ -6,6 +6,14 @@ pub async fn connect() -> Result<(String, tokio::io::DuplexStream), String> {
     Err("Connecting to Discord isn't supported on this system yet.".into())
 }
 
+pub async fn connect_to(_path: &str) -> Result<tokio::io::DuplexStream, String> {
+    connect().await.map(|(_, s)| s)
+}
+
+pub fn exists(_path: &str) -> bool {
+    false
+}
+
 pub fn discord_running() -> bool {
     false
 }

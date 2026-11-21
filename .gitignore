@@ -17,6 +17,7 @@ lerna-debug.log*
 
 # Rust / Cargo
 src-tauri/target/
+tools/*/target/
 
 # Tauri
 src-tauri/gen/
