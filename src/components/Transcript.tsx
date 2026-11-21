@@ -34,6 +34,8 @@ interface TranscriptProps {
   onRetranscribeModelChange: (id: string) => void;
   onRetranscribe: (index: number) => void;
   retranscribingIndex: number | null;
+  /** True while another transcription runs, so whisper isn't started twice. */
+  retranscribeDisabled: boolean;
   /** More tabs after Read and Edit (e.g. Stats, AI). Only shown when editable. */
   extraViews?: { id: string; label: string; render: () => ReactNode }[];
 }
@@ -357,7 +359,7 @@ function Editor(props: TranscriptProps & { setRowRef: (i: number) => (el: HTMLEl
                 >
                   Merge down
                 </button>
-                <button onClick={() => props.onRetranscribe(i)} disabled={busy}>
+                <button onClick={() => props.onRetranscribe(i)} disabled={busy || props.retranscribeDisabled}>
                   {retranscribingIndex === i ? "Transcribing..." : "Re-transcribe"}
                 </button>
                 <button className="editor-delete" onClick={() => onEdit(deleteSegment(data, i))} disabled={busy}>

@@ -36,6 +36,19 @@ PolyForm Noncommercial 1.0.0 (`LICENSE.md`).
 - Build: `npm run tauri build`
 - No bundled Whisper binary: the app downloads whisper.cpp into `%APPDATA%/d-scribe/engines/` (see `transcription/engine.rs`)
 
+## Tests
+
+`npm test` runs vitest: `src/__tests__/` renders the real `<App />` against a fake backend (`fakeBackend.ts`: in-memory `settings.json`, recordings, installed models; long commands like downloads, transcription and AI runs are held until the test settles them). Tests drive the UI by role and visible text only, so they survive refactors. `baseline.test.tsx` checks the happy paths; if it fails, the harness is broken, not the app. Rust: `cargo test --features transcription-whisper-cli` in `src-tauri`.
+
+## Shared state
+
+Screens unmount (Settings on tab switch, Manage models on collapse, the AI panel on view switch) while their jobs keep running, so nothing a job finishes into may live in a component:
+- `src/settingsStore.ts`: `setSetting` / `useSetting`. Settings that another screen reads go through it, so Session sees changes from Settings without a restart.
+- `src/installed.ts`: installed models, engine status, and `downloadModel` / `downloadEngine` (one per id at a time; the lists refresh when a download ends; failures stay in `useDownloadErrors` until retried or dismissed).
+- `src/tasks.ts`: progress for the task bar.
+- Session's `updateRecording(target, change)`: transcription, re-transcription and AI runs write their result to the recording they started on, open or not (loaded, changed and saved if it isn't open). Transcribed text is matched to segments by start and end time, so edits made meanwhile are kept.
+- Backend: `download::lock_path` makes downloads and engine installs of the same path wait for each other.
+
 ## Logging
 
 Logs go to the terminal (WASAPI trace filtered out) and to a file. Log file: `%APPDATA%/d-scribe/logs/d-scribe.log` (Windows Roaming, next to `recordings/`). Path shown in Settings.

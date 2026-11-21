@@ -576,6 +576,10 @@ async fn download_model_command(
         );
     })
     .await
+    .map_err(|e| {
+        log::error!("[models] Downloading {} failed: {}", model_name, e);
+        e
+    })
 }
 
 #[tauri::command]

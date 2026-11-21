@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useRef, useState } from "react";
 import { buildAiInput, loadAiConfig, transcriptAsText, type AiOutput, type AiPrompt } from "./aiConfig";
 import type { TranscriptData } from "./transcriptOps";
 import "./AiPanel.css";
@@ -7,17 +6,22 @@ import "./AiPanel.css";
 interface AiPanelProps {
   data: TranscriptData;
   outputs: AiOutput[];
-  onAdd: (output: AiOutput) => void;
+  /** Whether a prompt is running on this recording. Kept by the parent so it survives this panel closing. */
+  running: boolean;
+  /** The last run's error, if it failed. */
+  error: string;
+  /** Runs the command and saves the output to the recording, even if this panel closes meanwhile. */
+  onRun: (command: string, input: string, promptName: string) => void;
   onDelete: (index: number) => void;
 }
 
 /** Runs AI prompts on the transcript and lists the saved results, newest first. */
-export function AiPanel({ data, outputs, onAdd, onDelete }: AiPanelProps) {
+export function AiPanel({ data, outputs, running, error: runError, onRun, onDelete }: AiPanelProps) {
   const [prompts, setPrompts] = useState<AiPrompt[]>([]);
   const [command, setCommand] = useState("");
   const [promptId, setPromptId] = useState("");
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState("");
+  const [configError, setError] = useState("");
+  const error = configError || runError;
   const [copied, setCopied] = useState("");
   const [openIndex, setOpenIndex] = useState<number | null>(outputs.length ? outputs.length - 1 : null);
 
@@ -40,6 +44,14 @@ export function AiPanel({ data, outputs, onAdd, onDelete }: AiPanelProps) {
     refreshConfig();
   }, []);
 
+  // Open the newest output when one is added.
+  const count = outputs.length;
+  const seen = useRef(count);
+  useEffect(() => {
+    if (count > seen.current) setOpenIndex(count - 1);
+    seen.current = count;
+  }, [count]);
+
   const prompt = prompts.find((p) => p.id === promptId);
   const hasText = data.texts.some((t) => t?.trim());
 
@@ -47,20 +59,8 @@ export function AiPanel({ data, outputs, onAdd, onDelete }: AiPanelProps) {
     const config = await refreshConfig();
     const current = config?.prompts.find((p) => p.id === promptId);
     if (!config || !current) return;
-    setRunning(true);
     setError("");
-    try {
-      const output = await invoke<string>("run_ai_command", {
-        command: config.command,
-        input: buildAiInput(current.instructions, data),
-      });
-      onAdd({ prompt_name: current.name, output, created_at: Math.floor(Date.now() / 1000) });
-      setOpenIndex(outputs.length);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setRunning(false);
-    }
+    onRun(config.command, buildAiInput(current.instructions, data), current.name);
   }
 
   async function copy(text: string, what: string) {
