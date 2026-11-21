@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { load } from "@tauri-apps/plugin-store";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -7,12 +6,12 @@ import { enable as enableAutostart, disable as disableAutostart, isEnabled as is
 import { AiSettings } from "./AiSettings";
 import { EngineSettings } from "./EngineSettings";
 import { AudioSettings } from "./AudioSettings";
-import { runTask, bytesProgress, useTasks } from "../tasks";
+import { useTasks } from "../tasks";
+import { clearDownloadError, downloadModel, refreshInstalledModels, useDownloadErrors, useInstalledModels } from "../installed";
+import { setSetting, settingsStore } from "../settingsStore";
 import { formatSize } from "./RecordingsOverview";
 import { useDebouncedSave } from "../useDebouncedSave";
 import "./Settings.css";
-
-const STORE_PATH = "settings.json";
 
 /** The d-scribe Discord app. Used when the Client ID field is empty. Only its App Testers can connect. */
 const SHARED_CLIENT_ID = "1477100857064689897";
@@ -77,7 +76,9 @@ export function Settings() {
   const [loaded, setLoaded] = useState(false);
 
   const [modelRegistry, setModelRegistry] = useState<RegistryModel[]>([]);
-  const [installedModels, setInstalledModels] = useState<string[]>([]);
+  const installed = useInstalledModels();
+  const installedModels = installed ?? [];
+  const downloadErrors = useDownloadErrors();
   const [languageSlots, setLanguageSlots] = useState<LanguageSlot[]>(DEFAULT_LANGUAGE_SLOTS);
 
   const [addIntegratedModel, setAddIntegratedModel] = useState("base.en");
@@ -116,15 +117,6 @@ export function Settings() {
   }, []);
 
 
-  async function refreshInstalledModels() {
-    try {
-      const names = await invoke<string[]>("list_installed_model_names_command");
-      setInstalledModels(names);
-    } catch {
-      setInstalledModels([]);
-    }
-  }
-
   function isModelReady(m: RegistryModel): boolean {
     if (m.type === "integrated") {
       return installedModels.includes(m.id);
@@ -137,23 +129,29 @@ export function Settings() {
 
   const readyModels = modelRegistry.filter(isModelReady);
 
-  useEffect(() => {
-    const ready = modelRegistry.filter((m) => isModelReady(m));
-    const first = ready[0]?.id;
-    if (!first) return;
-    const valid = (id: string) => ready.some((m) => m.id === id);
-    setLanguageSlots((prev) =>
-      prev.map((slot) => ({
-        ...slot,
-        liveModel: slot.liveModel && valid(slot.liveModel) ? slot.liveModel : first,
-        regularModel: slot.regularModel && valid(slot.regularModel) ? slot.regularModel : first,
-      }))
+  /**
+   * Options for a slot's model picker: the ready models, plus the slot's current model when it
+   * isn't ready, so a missing model shows as missing instead of being swapped for another.
+   */
+  function slotModelOptions(current: string | undefined, models: RegistryModel[]) {
+    const missing = current && !models.some((m) => m.id === current) ? current : null;
+    return (
+      <>
+        {missing && (
+          <option value={missing}>
+            {missing} ({installed === null ? "checking" : modelRegistry.some((m) => m.id === missing && m.type === "integrated") ? "not downloaded" : "not available"})
+          </option>
+        )}
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>{displayModelLabel(m)}</option>
+        ))}
+      </>
     );
-  }, [modelRegistry, installedModels, remoteSources]);
+  }
 
   async function loadSettings() {
     try {
-      const store = await load(STORE_PATH, { defaults: {}, autoSave: true });
+      const store = await settingsStore();
       const cid = await store.get<string>("client_id");
       const buffer = await store.get<number>("segment_merge_buffer_ms");
       const retention = await store.get<number>("recent_retention_days");
@@ -173,13 +171,11 @@ export function Settings() {
 
       if (registry.length === 0) {
         registry = [...DEFAULT_REGISTRY];
-        await store.set("model_registry", registry);
-        await store.save();
+        await setSetting("model_registry", registry);
       }
       if (!slots || slots.length === 0) {
         slots = [...DEFAULT_LANGUAGE_SLOTS];
-        await store.set("language_slots", slots);
-        await store.save();
+        await setSetting("language_slots", slots);
       }
 
       setModelRegistry(registry);
@@ -189,7 +185,8 @@ export function Settings() {
         setAddRemoteSourceId(sources[0].id);
       }
 
-      await refreshInstalledModels();
+      // Files can change outside the app, so read the list again each time Settings opens.
+      refreshInstalledModels().catch((e) => setStatus(`Could not list installed models: ${e}`));
       setLoaded(true);
     } catch (e) {
       console.error("Failed to load settings:", e);
@@ -200,16 +197,14 @@ export function Settings() {
   useDebouncedSave(
     async () => {
       try {
-        const store = await load(STORE_PATH, { defaults: {}, autoSave: true });
-        await store.set("client_id", clientId);
-        await store.set("segment_merge_buffer_ms", segmentMergeBufferMs);
-        await store.set("recent_retention_days", recentRetentionDays);
-        await store.set("auto_record", autoRecord);
-        await store.set("recent_max_gb", recentMaxGb);
-        await store.set("remote_sources", remoteSources);
-        await store.set("model_registry", modelRegistry);
-        await store.set("language_slots", languageSlots);
-        await store.save();
+        await setSetting("client_id", clientId);
+        await setSetting("segment_merge_buffer_ms", segmentMergeBufferMs);
+        await setSetting("recent_retention_days", recentRetentionDays);
+        await setSetting("auto_record", autoRecord);
+        await setSetting("recent_max_gb", recentMaxGb);
+        await setSetting("remote_sources", remoteSources);
+        await setSetting("model_registry", modelRegistry);
+        await setSetting("language_slots", languageSlots);
       } catch (e) {
         setStatus(`Could not save settings: ${e}`);
       }
@@ -239,19 +234,8 @@ export function Settings() {
 
   async function downloadIntegratedModel(modelName: string) {
     setStatus("");
-    try {
-      await runTask(
-        `model:${modelName}`,
-        `Downloading ${modelName}`,
-        [{ event: "download-progress", map: (p) => (p.modelName === modelName ? bytesProgress(p) : null) }],
-        () => invoke<string>("download_model_command", { modelName }),
-      );
-      await refreshInstalledModels();
-      setStatus(`Downloaded ${modelName}`);
-    } catch (e) {
-      const msg = String(e);
-      setStatus(msg.includes("coming soon") ? "large-v3-turbo: coming soon" : `Download failed: ${msg}`);
-    }
+    // A failure is kept in useDownloadErrors and shown under the list, even if you left meanwhile.
+    await downloadModel(modelName).catch(() => {});
   }
 
   async function openModelsDir() {
@@ -755,6 +739,16 @@ export function Settings() {
                 ))}
               </div>
 
+              {Object.entries(downloadErrors)
+                .filter(([id]) => id.startsWith("model:"))
+                .map(([id, message]) => (
+                  <p key={id} className="field-hint" style={{ color: "var(--danger)" }}>
+                    Downloading {id.slice("model:".length)} failed: {message}{" "}
+                    <button type="button" className="link-button" onClick={() => clearDownloadError(id)}>
+                      Dismiss
+                    </button>
+                  </p>
+                ))}
               <div className="model-add-area">
                 <div className="model-add-row">
                   <label>Add Whisper model</label>
@@ -873,10 +867,8 @@ export function Settings() {
                             value={slot.liveModel}
                             onChange={(e) => updateLanguageSlot(slot.id, { liveModel: e.target.value })}
                           >
-                            {readyModels.map((m) => (
-                              <option key={m.id} value={m.id}>{displayModelLabel(m)}</option>
-                            ))}
-                            {readyModels.length === 0 && <option value="">Select model</option>}
+                            {slotModelOptions(slot.liveModel, readyModels)}
+                            {readyModels.length === 0 && !slot.liveModel && <option value="">Select model</option>}
                           </select>
                         </td>
                         <td>
@@ -884,10 +876,8 @@ export function Settings() {
                             value={slot.regularModel}
                             onChange={(e) => updateLanguageSlot(slot.id, { regularModel: e.target.value })}
                           >
-                            {readyModels.map((m) => (
-                              <option key={m.id} value={m.id}>{displayModelLabel(m)}</option>
-                            ))}
-                            {readyModels.length === 0 && <option value="">Select model</option>}
+                            {slotModelOptions(slot.regularModel, readyModels)}
+                            {readyModels.length === 0 && !slot.regularModel && <option value="">Select model</option>}
                           </select>
                         </td>
                         <td>
@@ -897,11 +887,7 @@ export function Settings() {
                               onChange={(e) => updateLanguageSlot(slot.id, { englishModel: e.target.value || undefined })}
                             >
                               <option value="">Off</option>
-                              {readyModels
-                                .filter((m) => m.type === "integrated")
-                                .map((m) => (
-                                  <option key={m.id} value={m.id}>{displayModelLabel(m)}</option>
-                                ))}
+                              {slotModelOptions(slot.englishModel, readyModels.filter((m) => m.type === "integrated"))}
                             </select>
                           )}
                         </td>

@@ -2,19 +2,15 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { load } from "@tauri-apps/plugin-store";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { runTask, bytesProgress, useTasks } from "../tasks";
-
-type Kind = "cuda" | "vulkan" | "cpu";
-
-interface EngineStatus {
-  cpu: boolean;
-  cuda: boolean;
-  vulkan: boolean;
-  nvidia: boolean;
-  vulkanDriver: boolean;
-  /** The engine transcription will use, or null if the chosen one isn't installed. */
-  active: Kind | null;
-}
+import { useTasks } from "../tasks";
+import {
+  clearDownloadError,
+  downloadEngine,
+  refreshEngineStatus,
+  useDownloadErrors,
+  useEngineStatus,
+  type EngineKind as Kind,
+} from "../installed";
 
 const ENGINES: { kind: Kind; label: string; size: string }[] = [
   { kind: "cuda", label: "NVIDIA GPU", size: "650 MB" },
@@ -79,17 +75,19 @@ function GpuChoice({ kind }: { kind: "cuda" | "vulkan" }) {
 
 /** Downloads whisper.cpp engines and picks which one transcribes. Saved as "engine" in settings.json. */
 export function EngineSettings() {
-  const [engine, setEngine] = useState<EngineStatus | null>(null);
+  const engine = useEngineStatus();
   const [choice, setChoice] = useState("auto");
   const tasks = useTasks();
   const downloading = ENGINES.find((e) => tasks.some((t) => t.id === `engine:${e.kind}`))?.kind ?? null;
+  const downloadErrors = useDownloadErrors();
   const [error, setError] = useState("");
 
   function refresh() {
-    invoke<EngineStatus>("engine_status_command").then(setEngine).catch((e) => setError(String(e)));
+    refreshEngineStatus().catch((e) => setError(String(e)));
   }
 
   useEffect(() => {
+    // Engines can also change outside this screen (the CPU engine downloads on first transcribe).
     refresh();
     load("settings.json", { defaults: {}, autoSave: true }).then(async (store) => {
       setChoice((await store.get<string>("engine")) || "auto");
@@ -106,17 +104,8 @@ export function EngineSettings() {
 
   async function download(kind: Kind) {
     setError("");
-    try {
-      await runTask(
-        `engine:${kind}`,
-        `Downloading the ${labelOf(kind)} engine`,
-        [{ event: "engine-download-progress", map: (p) => (p.kind === kind ? bytesProgress(p) : null) }],
-        () => invoke("download_engine_command", { kind }),
-      );
-    } catch (e) {
-      setError(`Download failed: ${e}`);
-    }
-    refresh();
+    // A failure is kept in useDownloadErrors and shown below, even if you left meanwhile.
+    await downloadEngine(kind, labelOf(kind)).catch(() => {});
   }
 
   async function remove(kind: Kind) {
@@ -192,6 +181,14 @@ export function EngineSettings() {
               : "No Vulkan driver found, so the Vulkan engine is not available."}
         </span>
       )}
+      {ENGINES.filter((e) => downloadErrors[`engine:${e.kind}`]).map((e) => (
+        <span key={e.kind} className="field-hint" style={{ color: "var(--danger)" }}>
+          Downloading the {e.label} engine failed: {downloadErrors[`engine:${e.kind}`]}{" "}
+          <button type="button" className="link-button" onClick={() => clearDownloadError(`engine:${e.kind}`)}>
+            Dismiss
+          </button>
+        </span>
+      ))}
       {error && <span className="field-hint" style={{ color: "var(--danger)" }}>{error}</span>}
     </div>
   );

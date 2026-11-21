@@ -250,6 +250,8 @@ where
     F: FnMut(u64, Option<u64>) + Send,
 {
     let dir = engine_dir(engines_root, kind);
+    // One install per engine at a time; a second caller waits and then finds it installed.
+    let _lock = super::download::lock_path(&dir).await;
     if is_installed(engines_root, kind) {
         return Ok(dir);
     }

@@ -7,10 +7,12 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { StatsPanel } from "./StatsPanel";
 import { PlaybackBar } from "./PlaybackBar";
 import { Transcript, type Speaker } from "./Transcript";
-import { setText, type TranscriptData } from "./transcriptOps";
+import { type TranscriptData } from "./transcriptOps";
 import { AiPanel } from "./AiPanel";
 import { Menu } from "./Menu";
-import { runTask, bytesProgress } from "../tasks";
+import { runTask, bytesProgress, useTasks } from "../tasks";
+import { downloadModel as downloadSharedModel, refreshEngineStatus, useInstalledModels } from "../installed";
+import { useSetting } from "../settingsStore";
 import { RecordingsOverview, placeLabel, type ProjectMeta } from "./RecordingsOverview";
 import type { AiOutput } from "./aiConfig";
 import "./Session.css";
@@ -80,15 +82,21 @@ export function Session() {
   const [headHeight, setHeadHeight] = useState(0);
   const [playbackCurrentTime, setPlaybackCurrentTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
-  const [languageSlots, setLanguageSlots] = useState<LanguageSlot[]>(DEFAULT_LANGUAGE_SLOTS);
+  // Edited in Settings; useSetting keeps these current while this tab stays mounted.
+  const savedSlots = useSetting<LanguageSlot[]>("language_slots");
+  const languageSlots = savedSlots && savedSlots.length > 0 ? savedSlots : DEFAULT_LANGUAGE_SLOTS;
   const [selectedLanguageId, setSelectedLanguageId] = useState("en");
-  const [remoteSources, setRemoteSources] = useState<{ id: string; name: string; host: string; transcriptionPath?: string; apiKey?: string }[]>([]);
-  const [modelRegistry, setModelRegistry] = useState<{ id: string; type: "integrated" | "remote"; sourceId?: string; modelName?: string }[]>([]);
-  const [installedModels, setInstalledModels] = useState<string[] | null>(null);
+  const remoteSources = useSetting<{ id: string; name: string; host: string; transcriptionPath?: string; apiKey?: string }[]>("remote_sources") ?? [];
+  const modelRegistry = useSetting<{ id: string; type: "integrated" | "remote"; sourceId?: string; modelName?: string }[]>("model_registry") ?? [];
+  const installedModels = useInstalledModels();
+  const tasks = useTasks();
   const audioRemoteRef = useRef<HTMLAudioElement | null>(null);
   const audioLocalRef = useRef<HTMLAudioElement | null>(null);
   const [retranscribeModelId, setRetranscribeModelId] = useState("");
-  const [retranscribingIndex, setRetranscribingIndex] = useState<number | null>(null);
+  /** The segment being re-transcribed, in the recording it belongs to. */
+  const [retranscribing, setRetranscribing] = useState<{ sessionId: string; index: number } | null>(null);
+  /** AI prompts running, by recording, so a run survives leaving the AI tab or the recording. */
+  const [aiRuns, setAiRuns] = useState<Record<string, { running: boolean; error: string }>>({});
   const history = useRef<{ past: TranscriptData[]; future: TranscriptData[]; lastKey?: string }>({ past: [], future: [] });
   const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
   // Set by edits and transcription so only real changes get auto-saved.
@@ -126,13 +134,7 @@ export function Session() {
         const store = await load("settings.json", { defaults: {}, autoSave: true });
         const pm = await store.get<string>("playback_mode");
         if (pm === "remote" || pm === "local" || pm === "both") setPlaybackMode(pm);
-        const slots = (await store.get<LanguageSlot[]>("language_slots")) || DEFAULT_LANGUAGE_SLOTS;
-        const selId = (await store.get<string>("selected_language_id")) || "en";
-        setLanguageSlots(slots.length > 0 ? slots : DEFAULT_LANGUAGE_SLOTS);
-        setSelectedLanguageId(slots.some((s) => s.id === selId) ? selId : slots[0]?.id || "en");
-        const sources = (await store.get<{ id: string; name: string; host: string; transcriptionPath?: string; apiKey?: string }[]>("remote_sources")) || [];
-        setRemoteSources(sources);
-        setModelRegistry((await store.get<{ id: string; type: "integrated" | "remote"; sourceId?: string; modelName?: string }[]>("model_registry")) || []);
+        setSelectedLanguageId((await store.get<string>("selected_language_id")) || "en");
       } catch {
         /* ignore */
       }
@@ -172,11 +174,6 @@ export function Session() {
   function getRegularModelId() {
     return selectedSlot?.regularModel ?? "";
   }
-
-  // Re-read on language change, since models can be downloaded in Settings meanwhile.
-  useEffect(() => {
-    invoke<string[]>("list_installed_model_names_command").then(setInstalledModels).catch(() => setInstalledModels(null));
-  }, [selectedLanguageId]);
 
   /** First local model the selected language needs that isn't downloaded yet. */
   const missingModel =
@@ -537,11 +534,11 @@ export function Session() {
 
   /** Runs transcription with `modelId`. Returns the new texts, or null if it couldn't start or failed. */
   async function runTranscription(
+    state: SessionState,
     modelId: string,
     onlyIndices?: number[],
     englishModelId?: string,
   ): Promise<string[] | null> {
-    if (!session) return null;
     const modelType = getModelType(modelId);
     if (!modelType) {
       setStatus("Select a model in Settings for transcription.");
@@ -570,7 +567,7 @@ export function Session() {
     }
     try {
       const newState = await invoke<SessionState>("transcribe_session_command", {
-        state: session,
+        state,
         modelPath,
         englishModelPath,
         transcriptionMode: remoteConfig ? "remote" : "integrated",
@@ -587,8 +584,54 @@ export function Session() {
     }
   }
 
+  /**
+   * Changes a recording by id, wherever the user is now. Long jobs finish through this: if the
+   * recording is open its state changes (with undo), otherwise it's loaded, changed and saved.
+   */
+  async function updateRecording(target: { id: string; path: string | null }, change: (state: SessionState) => SessionState) {
+    const open = sessionRef.current;
+    if (open && open.session_id === target.id) {
+      const next = change(open);
+      if (next.segments !== open.segments || next.transcript_texts !== open.transcript_texts) {
+        const h = history.current;
+        h.past.push(transcriptData(open));
+        if (h.past.length > 200) h.past.shift();
+        h.future = [];
+        h.lastKey = undefined;
+        syncHistorySize();
+      }
+      dirty.current = true;
+      sessionRef.current = next;
+      setSession(next);
+      return;
+    }
+    if (!target.path) throw new Error("The recording was closed before it was saved");
+    const saved = await invoke<SessionState>("load_project_command", { path: target.path });
+    await invoke("save_project_command", { path: target.path, state: change(saved) });
+  }
+
+  /**
+   * Puts texts transcribed from `from` onto the matching segments of `state`. Segments are
+   * matched by start and end time, so edits made meanwhile (speakers, other texts) are kept;
+   * a segment that was split or merged meanwhile keeps what it has.
+   */
+  function placeTexts(state: SessionState, from: SessionSegment[], texts: string[], only?: number[]): SessionState {
+    const next = [...state.transcript_texts];
+    while (next.length < state.segments.length) next.push("");
+    for (const i of only ?? from.map((_, i) => i)) {
+      const seg = from[i];
+      const j = state.segments.findIndex((s) => s.start_ms === seg.start_ms && s.end_ms === seg.end_ms);
+      if (j >= 0) next[j] = texts[i] ?? "";
+    }
+    return { ...state, transcript_texts: next };
+  }
+
+  const busyTranscribing = transcribing || retranscribing !== null;
+
   async function transcribeSession() {
-    if (!session) return;
+    const started = session;
+    if (!started || busyTranscribing) return;
+    const target = { id: started.session_id, path: currentProjectPath };
     setTranscribing(true);
     setStatus("");
     const modelId = getRegularModelId();
@@ -596,51 +639,75 @@ export function Session() {
     const englishModelId = selectedSlot?.englishModel;
     const models =
       remoteModel ?? (englishModelId && englishModelId !== modelId ? `${modelId}, ${englishModelId} for English` : modelId);
-    const texts = await runTask(
-      "transcribe",
-      remoteModel ? `Starting ${models}` : `Loading ${models}`,
-      [
-        {
-          event: "transcribe-progress",
-          map: (p) => ({ done: p.done, total: p.total, unit: "items", label: `Transcribing with ${models}` }),
-        },
-        {
-          event: "engine-download-progress",
-          map: (p) => ({ ...bytesProgress(p), label: "Downloading the Whisper engine" }),
-        },
-      ],
-      () => runTranscription(modelId, undefined, englishModelId),
-    );
-    setTranscribing(false);
-    if (texts) {
-      applyEdit({ ...transcriptData(session), texts });
-      setStatus("Transcription complete.");
+    try {
+      const texts = await runTask(
+        "transcribe",
+        remoteModel ? `Starting ${models}` : `Loading ${models}`,
+        [
+          {
+            event: "transcribe-progress",
+            map: (p) => ({ done: p.done, total: p.total, unit: "items", label: `Transcribing with ${models}` }),
+          },
+          {
+            event: "engine-download-progress",
+            map: (p) => ({ ...bytesProgress(p), label: "Downloading the Whisper engine" }),
+          },
+        ],
+        () => runTranscription(started, modelId, undefined, englishModelId),
+      );
+      if (texts) {
+        await updateRecording(target, (state) => placeTexts(state, started.segments, texts));
+        setStatus(sessionRef.current?.session_id === target.id ? "Transcription complete." : `Transcription of ${started.title || started.session_id} is done.`);
+      }
+    } catch (e) {
+      setStatus(`Could not save the transcription: ${e}`);
+    } finally {
+      setTranscribing(false);
+      // The first transcription downloads the CPU engine.
+      refreshEngineStatus().catch((e) => console.error("Could not read engines:", e));
     }
   }
 
   async function retranscribeSegment(index: number) {
-    if (!session) return;
-    setRetranscribingIndex(index);
-    const texts = await runTranscription(retranscribeModelId || getRegularModelId(), [index]);
-    setRetranscribingIndex(null);
-    const latest = sessionRef.current;
-    if (texts && latest) applyEdit(setText(transcriptData(latest), index, texts[index] ?? ""));
+    const started = session;
+    if (!started || busyTranscribing) return;
+    const target = { id: started.session_id, path: currentProjectPath };
+    setRetranscribing({ sessionId: started.session_id, index });
+    try {
+      const texts = await runTranscription(started, retranscribeModelId || getRegularModelId(), [index]);
+      if (texts) await updateRecording(target, (state) => placeTexts(state, started.segments, texts, [index]));
+    } catch (e) {
+      setStatus(`Could not save the transcription: ${e}`);
+    } finally {
+      setRetranscribing(null);
+    }
+  }
+
+  /** Runs an AI prompt on the open recording and saves the output to it, even if you leave. */
+  async function runAiPrompt(command: string, input: string, promptName: string) {
+    const started = session;
+    if (!started || aiRuns[started.session_id]?.running) return;
+    const id = started.session_id;
+    const target = { id, path: currentProjectPath };
+    setAiRuns((runs) => ({ ...runs, [id]: { running: true, error: "" } }));
+    let error = "";
+    try {
+      const output = await invoke<string>("run_ai_command", { command, input });
+      const entry: AiOutput = { prompt_name: promptName, output, created_at: Math.floor(Date.now() / 1000) };
+      await updateRecording(target, (state) => ({ ...state, ai_outputs: [...(state.ai_outputs ?? []), entry] }));
+    } catch (e) {
+      error = String(e);
+    }
+    setAiRuns((runs) => ({ ...runs, [id]: { running: false, error } }));
   }
 
   async function downloadModel(modelName: string) {
     setStatus("");
     try {
-      const path = await runTask(
-        `model:${modelName}`,
-        `Downloading ${modelName}`,
-        [{ event: "download-progress", map: (p) => (p.modelName === modelName ? bytesProgress(p) : null) }],
-        () => invoke<string>("download_model_command", { modelName }),
-      );
+      const path = await downloadSharedModel(modelName);
       setStatus(`Model downloaded to ${path}`);
-      setInstalledModels(await invoke<string[]>("list_installed_model_names_command"));
     } catch (e) {
-      const msg = String(e);
-      setStatus(msg.includes("coming soon") ? "large-v3-turbo: coming soon" : `Download failed: ${e}`);
+      setStatus(`Download failed: ${e}`);
     }
   }
 
@@ -878,7 +945,7 @@ export function Session() {
             <label htmlFor="language-select">Language</label>
             <select
               id="language-select"
-              value={selectedLanguageId}
+              value={selectedSlot?.id ?? ""}
               onChange={(e) => setSelectedLanguageId(e.target.value)}
             >
               {languageSlots.map((slot) => (
@@ -982,7 +1049,7 @@ export function Session() {
                   )}
                   <div className="session-head-actions">
                     <select
-                      value={selectedLanguageId}
+                      value={selectedSlot?.id ?? ""}
                       onChange={(e) => setSelectedLanguageId(e.target.value)}
                       aria-label="Language"
                       title="Language to transcribe in"
@@ -994,11 +1061,15 @@ export function Session() {
                       ))}
                     </select>
                     {missingModel ? (
-                      <button type="button" onClick={() => downloadModel(missingModel)} disabled={transcribing}>
-                        Download {missingModel}
+                      <button
+                        type="button"
+                        onClick={() => downloadModel(missingModel)}
+                        disabled={busyTranscribing || tasks.some((t) => t.id === `model:${missingModel}`)}
+                      >
+                        {tasks.some((t) => t.id === `model:${missingModel}`) ? `Downloading ${missingModel}...` : `Download ${missingModel}`}
                       </button>
                     ) : (
-                      <button type="button" onClick={transcribeSession} disabled={transcribing || !canTranscribe}>
+                      <button type="button" onClick={transcribeSession} disabled={busyTranscribing || !canTranscribe}>
                         {transcribing ? "Transcribing..." : "Transcribe"}
                       </button>
                     )}
@@ -1121,7 +1192,8 @@ export function Session() {
           retranscribeModelId={retranscribeModelId || getRegularModelId()}
           onRetranscribeModelChange={setRetranscribeModelId}
           onRetranscribe={retranscribeSegment}
-          retranscribingIndex={retranscribingIndex}
+          retranscribingIndex={retranscribing && retranscribing.sessionId === session?.session_id ? retranscribing.index : null}
+          retranscribeDisabled={busyTranscribing}
           extraViews={
             session && !recording
               ? [
@@ -1134,7 +1206,9 @@ export function Session() {
                         key={session.session_id}
                         data={transcriptData(session)}
                         outputs={session.ai_outputs ?? []}
-                        onAdd={(output) => updateAiOutputs((list) => [...list, output])}
+                        running={!!aiRuns[session.session_id]?.running}
+                        error={aiRuns[session.session_id]?.error ?? ""}
+                        onRun={runAiPrompt}
                         onDelete={(index) => updateAiOutputs((list) => list.filter((_, i) => i !== index))}
                       />
                     ),
