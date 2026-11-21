@@ -8,7 +8,7 @@ name: engine
 # already there, the build is skipped. Delete the release to rebuild.
 #
 # After a RELEASE bump: push, let this run, copy the SHA256 values it prints into
-# asset_sha256 in engine.rs, push again. The smoke test fails until they match.
+# `asset` in engine.rs, push again. The smoke test fails until they match.
 on:
   push:
     paths:

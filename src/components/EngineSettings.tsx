@@ -120,13 +120,16 @@ export function EngineSettings() {
 
   if (!engine) return null;
   const hasDriver = (kind: Kind) => (kind === "cuda" ? engine.nvidia : kind === "vulkan" ? engine.vulkanDriver : true);
+  const offered = ENGINES.filter((e) => engine.available.includes(e.kind));
+  const gpuEngines = offered.filter((e) => e.kind !== "cpu");
+  const noDriver = gpuEngines.filter((e) => !hasDriver(e.kind));
 
   return (
     <div className="form-group">
       <label htmlFor="engine-choice">Transcription engine</label>
       <select id="engine-choice" value={choice} onChange={(e) => choose(e.target.value)}>
         <option value="auto">Automatic (fastest installed)</option>
-        {ENGINES.map((e) => (
+        {offered.map((e) => (
           <option key={e.kind} value={e.kind} disabled={!engine[e.kind] && choice !== e.kind}>
             {e.label}
             {engine[e.kind] ? "" : " (not installed)"}
@@ -145,7 +148,7 @@ export function EngineSettings() {
       </span>
       {(engine.active === "cuda" || engine.active === "vulkan") && <GpuChoice key={engine.active} kind={engine.active} />}
       <div className="button-row" style={{ marginTop: "0.5rem" }}>
-        {ENGINES.map((e) =>
+        {offered.map((e) =>
           engine[e.kind] ? (
             <button key={e.kind} type="button" onClick={() => remove(e.kind)} disabled={downloading != null}>
               Remove {e.label} engine
@@ -172,13 +175,14 @@ export function EngineSettings() {
           Open engines folder
         </button>
       </div>
-      {(!engine.nvidia || !engine.vulkanDriver) && (
+      {noDriver.length > 0 && (
         <span className="field-hint">
-          {!engine.nvidia && !engine.vulkanDriver
+          {noDriver.length === gpuEngines.length && gpuEngines.length > 1
             ? "No graphics driver with GPU support found, so only the CPU engine is available."
-            : !engine.nvidia
-              ? "No NVIDIA driver found, so the NVIDIA engine is not available."
-              : "No Vulkan driver found, so the Vulkan engine is not available."}
+            : noDriver
+                .map((e) => (e.kind === "cuda" ? "NVIDIA" : "Vulkan"))
+                .map((name) => `No ${name} driver found, so the ${name} engine is not available.`)
+                .join(" ")}
         </span>
       )}
       {ENGINES.filter((e) => downloadErrors[`engine:${e.kind}`]).map((e) => (

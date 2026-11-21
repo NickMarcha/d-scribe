@@ -31,10 +31,12 @@ KINDS = {"cpu": "Cpu", "cuda": "Cuda", "vulkan": "Vulkan"}
 def engine_rs():
     src = open(ENGINE_RS, encoding="utf8").read()
     release = re.search(r'const RELEASE: &str = "([^"]+)";', src).group(1)
-    urls = {k: u.replace("{RELEASE}", release) for k, u in re.findall(r'Self::(\w+) => format!\(\s*"([^"]+)"', src)}
-    sha_fn = src[src.index("fn asset_sha256"):]
-    sha_fn = sha_fn[: sha_fn.index("\n    }\n")]
-    hashes = dict(re.findall(r'Self::(\w+) => "([^"]+)",', sha_fn))
+    # The Windows builds: the first `fn asset` (the one under #[cfg(windows)]).
+    asset_fn = src[src.index("fn asset(kind"):]
+    asset_fn = asset_fn[: asset_fn.index("\n}\n")]
+    entries = re.findall(r'EngineKind::(\w+) => \(\s*format!\("([^"]+)"\),\s*"([0-9a-f]+)",', asset_fn)
+    urls = {k: u.replace("{RELEASE}", release) for k, u, _ in entries}
+    hashes = {k: h for k, _, h in entries}
     return release, urls, hashes
 
 
@@ -162,7 +164,7 @@ def main():
         actual, expected = sha256(zip_path), hashes.get(variant)
         print(f"{label}: SHA256 {actual}")
         if actual != expected:
-            problems.append(f"SHA256 is {actual}, engine.rs says {expected}. Put the new value in asset_sha256.")
+            problems.append(f"SHA256 is {actual}, engine.rs says {expected}. Put the new value in `asset` in engine.rs.")
         if args.hash_only:
             return finish(label, problems)
 

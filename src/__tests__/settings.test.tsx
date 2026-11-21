@@ -142,6 +142,35 @@ describe("downloads that finish while you are on another tab", () => {
     expect(await screen.findByRole("button", { name: /Remove GPU \(Vulkan\) engine/ })).toBeInTheDocument();
   });
 
+  it("only engines this system can download are offered", async () => {
+    defaultBackend({
+      engine: { cpu: false, cuda: false, vulkan: false, nvidia: false, vulkanDriver: false, active: null, available: ["cpu"] },
+    });
+    const user = await renderApp();
+
+    await goToTab(user, "Settings");
+    await openManageModels(user);
+
+    expect(await screen.findByRole("button", { name: /Download CPU engine/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /NVIDIA/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Vulkan/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /NVIDIA|Vulkan/ })).not.toBeInTheDocument();
+    // No driver warnings for engines that aren't offered anyway.
+    expect(screen.queryByText(/driver found/)).not.toBeInTheDocument();
+  });
+
+  it("a missing driver is named for the engines that are offered", async () => {
+    defaultBackend({ engine: { nvidia: false, vulkanDriver: true } });
+    const user = await renderApp();
+
+    await goToTab(user, "Settings");
+    await openManageModels(user);
+
+    expect(await screen.findByText("No NVIDIA driver found, so the NVIDIA engine is not available.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download NVIDIA GPU engine/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Download GPU \(Vulkan\) engine/ })).toBeEnabled();
+  });
+
   it("a model download that fails while you are on another tab shows its error when you come back", async () => {
     const backend = backendWithLargeV3Missing();
     const user = await renderApp();

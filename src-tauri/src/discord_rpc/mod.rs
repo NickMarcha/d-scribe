@@ -4,12 +4,12 @@ mod client;
 mod events;
 mod token_store;
 
-#[cfg(windows)]
 mod ipc;
 
 pub use token_store::{load_tokens, save_tokens, DiscordTokens};
 
 pub use client::DiscordRpcClient;
+pub use ipc::discord_running;
 pub use events::{ChannelInfo, SpeakingEvent};
 
 use lazy_static::lazy_static;

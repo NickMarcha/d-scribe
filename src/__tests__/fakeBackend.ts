@@ -42,6 +42,7 @@ export interface EngineStatus {
   nvidia: boolean;
   vulkanDriver: boolean;
   active: "cuda" | "vulkan" | "cpu" | null;
+  available: ("cuda" | "vulkan" | "cpu")[];
 }
 
 export type Args = Record<string, any>;
@@ -117,7 +118,7 @@ export class FakeBackend {
       this.saved.set(path, opts.saved?.[path] ?? false);
     }
     this.installedModels = [...(opts.installedModels ?? [])];
-    this.engine = { cpu: true, cuda: false, vulkan: false, nvidia: false, vulkanDriver: true, active: "cpu", ...opts.engine };
+    this.engine = { cpu: true, cuda: false, vulkan: false, nvidia: false, vulkanDriver: true, active: "cpu", available: ["cuda", "vulkan", "cpu"], ...opts.engine };
     this.controlled = new Set([...DEFAULT_CONTROLLED, ...(opts.control ?? [])]);
   }
 
