@@ -119,28 +119,6 @@ async fn discord_rpc_auto_reconnect(app: tauri::AppHandle) -> Result<bool, Strin
     Ok(true)
 }
 
-/// Discord desktop is running if one of its IPC pipes (discord-ipc-0..9) exists.
-/// Lists the pipe namespace instead of opening pipes, so no connection is made.
-async fn is_discord_running() -> bool {
-    #[cfg(windows)]
-    {
-        std::fs::read_dir(r"\\.\pipe\")
-            .map(|entries| {
-                entries.flatten().any(|e| {
-                    e.file_name()
-                        .to_str()
-                        .and_then(|n| n.strip_prefix("discord-ipc-"))
-                        .is_some_and(|n| n.len() == 1 && n.as_bytes()[0].is_ascii_digit())
-                })
-            })
-            .unwrap_or(false)
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
-}
-
 #[tauri::command]
 async fn discord_rpc_connection_state() -> Result<serde_json::Value, String> {
     let state = if get_channel_info().is_some() {
@@ -150,7 +128,7 @@ async fn discord_rpc_connection_state() -> Result<serde_json::Value, String> {
     } else {
         "Disconnected"
     };
-    let discord_running = is_discord_running().await;
+    let discord_running = discord_rpc::discord_running();
     Ok(serde_json::json!({
         "state": state,
         "discord_running": discord_running
@@ -430,7 +408,6 @@ async fn storage_usage_command(app: tauri::AppHandle) -> Result<serde_json::Valu
     .map_err(|e| e.to_string())?
 }
 
-#[cfg(windows)]
 #[tauri::command]
 async fn list_audio_devices_command() -> Result<audio::AudioDevices, String> {
     tauri::async_runtime::spawn_blocking(audio::list_audio_devices)
@@ -439,7 +416,6 @@ async fn list_audio_devices_command() -> Result<audio::AudioDevices, String> {
 }
 
 /// Peak level (0..1) of a source over 3 seconds, for the Test buttons in Settings.
-#[cfg(windows)]
 #[tauri::command]
 async fn measure_audio_level_command(mic: bool, device_id: Option<String>) -> Result<f32, String> {
     tauri::async_runtime::spawn_blocking(move || audio::measure_level(mic, device_id, std::time::Duration::from_secs(3)))
@@ -673,14 +649,15 @@ async fn gpu_devices_command(app: tauri::AppHandle, kind: String) -> Result<Vec<
 #[tauri::command]
 fn engine_status_command(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let root = paths::engines_dir(&app)?;
-    let system32 = std::path::Path::new(r"C:\Windows\System32");
+    let (nvidia, vulkan_driver) = transcription::gpu_drivers();
     let active = chosen_engine(&root, &setting_str(&app, "engine")).ok().flatten().map(|(k, _)| k.name());
     Ok(serde_json::json!({
         "cpu": is_installed(&root, EngineKind::Cpu),
         "cuda": is_installed(&root, EngineKind::Cuda),
         "vulkan": is_installed(&root, EngineKind::Vulkan),
-        "nvidia": system32.join("nvcuda.dll").exists(),
-        "vulkanDriver": system32.join("vulkan-1.dll").exists(),
+        "nvidia": nvidia,
+        "vulkanDriver": vulkan_driver,
+        "available": EngineKind::available().iter().map(|k| k.name()).collect::<Vec<_>>(),
         "active": active,
     }))
 }
@@ -860,20 +837,12 @@ fn export_transcript(
     }
 }
 
-/// Log directory in Roaming (with projects). Resolved without AppHandle.
+/// Log directory next to the recordings (the app data folder: %APPDATA%\d-scribe on Windows,
+/// ~/.local/share/d-scribe on Linux). Resolved without AppHandle.
 fn log_dir_path() -> std::path::PathBuf {
-    #[cfg(windows)]
-    {
-        std::env::var("APPDATA")
-            .map(|p| std::path::PathBuf::from(p).join("d-scribe").join("logs"))
-            .unwrap_or_else(|_| std::path::PathBuf::from(".").join("logs"))
-    }
-    #[cfg(not(windows))]
-    {
-        dirs::data_dir()
-            .map(|d| d.join("d-scribe").join("logs"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".").join("logs"))
-    }
+    dirs::data_dir()
+        .map(|d| d.join("d-scribe").join("logs"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".").join("logs"))
 }
 
 fn init_logger() -> Result<std::path::PathBuf, fern::InitError> {

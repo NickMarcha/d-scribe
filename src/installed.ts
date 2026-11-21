@@ -16,6 +16,8 @@ export interface EngineStatus {
   vulkan: boolean;
   nvidia: boolean;
   vulkanDriver: boolean;
+  /** Engines this system can download, fastest first. */
+  available: EngineKind[];
   /** The engine transcription will use, or null if the chosen one isn't installed. */
   active: EngineKind | null;
 }

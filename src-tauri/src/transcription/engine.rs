@@ -6,9 +6,69 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Pinned whisper.cpp build. Every zip contains a `Release/` folder (or the files directly)
-/// with whisper-server.exe and the ggml DLLs. On a bump, the `engine` workflow builds the
-/// Vulkan zip for the new build and prints the SHA256 values for `asset_sha256`.
+/// with whisper-server and the ggml libraries. On a bump, the `engine` workflow builds the
+/// Vulkan zip for the new build and prints the SHA256 values for `asset`.
 const RELEASE: &str = "b5454";
+
+/// A downloadable engine build for this system.
+struct Asset {
+    url: String,
+    /// SHA256 of the zip, checked after download.
+    sha256: &'static str,
+}
+
+/// The engine builds for this system. A kind without one isn't offered.
+#[cfg(windows)]
+fn asset(kind: EngineKind) -> Option<Asset> {
+    let (url, sha256) = match kind {
+        EngineKind::Cpu => (
+            format!("https://github.com/ggml-org/whisper.cpp/releases/download/{RELEASE}/whisper-bin-x64.zip"),
+            "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb",
+        ),
+        EngineKind::Cuda => (
+            format!("https://github.com/ggml-org/whisper.cpp/releases/download/{RELEASE}/whisper-bin-win-cuda-12.4.0-x64.zip"),
+            "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a",
+        ),
+        EngineKind::Vulkan => (
+            format!("https://github.com/NickMarcha/d-scribe/releases/download/engine-{RELEASE}/whisper-bin-win-vulkan-x64.zip"),
+            "97a688c17a574a5b24234064e8b1b9a5c9b33dca4a48977b37005ab29c1741d4",
+        ),
+    };
+    Some(Asset { url, sha256 })
+}
+
+/// No builds yet. Linux builds would come from the `engine` workflow like the Windows Vulkan one.
+#[cfg(not(windows))]
+fn asset(_kind: EngineKind) -> Option<Asset> {
+    None
+}
+
+/// Whether the drivers each GPU engine needs are installed: (NVIDIA/CUDA, Vulkan).
+#[cfg(windows)]
+pub fn gpu_drivers() -> (bool, bool) {
+    let system32 = Path::new(r"C:\Windows\System32");
+    (system32.join("nvcuda.dll").exists(), system32.join("vulkan-1.dll").exists())
+}
+
+#[cfg(not(windows))]
+pub fn gpu_drivers() -> (bool, bool) {
+    (false, false)
+}
+
+/// The server executable inside an engine folder.
+fn server_exe() -> String {
+    format!("whisper-server{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// Files kept when unpacking an engine zip: the executables and their shared libraries.
+fn is_engine_file(name: &str) -> bool {
+    let lib = std::env::consts::DLL_SUFFIX;
+    name == server_exe()
+        || name == format!("whisper-cli{}", std::env::consts::EXE_SUFFIX)
+        || name.ends_with(lib)
+        // Versioned Linux libraries: libggml.so.1
+        || (lib == ".so" && name.contains(".so."))
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EngineKind {
@@ -49,25 +109,9 @@ impl EngineKind {
         }
     }
 
-    fn url(self) -> String {
-        match self {
-            Self::Cpu => format!("https://github.com/ggml-org/whisper.cpp/releases/download/{RELEASE}/whisper-bin-x64.zip"),
-            Self::Cuda => format!(
-                "https://github.com/ggml-org/whisper.cpp/releases/download/{RELEASE}/whisper-bin-win-cuda-12.4.0-x64.zip"
-            ),
-            Self::Vulkan => format!(
-                "https://github.com/NickMarcha/d-scribe/releases/download/engine-{RELEASE}/whisper-bin-win-vulkan-x64.zip"
-            ),
-        }
-    }
-
-    /// SHA256 of the zip for `RELEASE`, checked after download.
-    fn asset_sha256(self) -> &'static str {
-        match self {
-            Self::Cpu => "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb",
-            Self::Cuda => "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a",
-            Self::Vulkan => "97a688c17a574a5b24234064e8b1b9a5c9b33dca4a48977b37005ab29c1741d4",
-        }
+    /// The engines that can be downloaded on this system, fastest first.
+    pub fn available() -> Vec<EngineKind> {
+        Self::ALL.into_iter().filter(|k| asset(*k).is_some()).collect()
     }
 }
 
@@ -76,7 +120,7 @@ pub fn engine_dir(engines_root: &Path, kind: EngineKind) -> PathBuf {
 }
 
 pub fn is_installed(engines_root: &Path, kind: EngineKind) -> bool {
-    engine_dir(engines_root, kind).join("whisper-server.exe").exists()
+    engine_dir(engines_root, kind).join(server_exe()).exists()
 }
 
 /// The engine to run. `choice` is the "engine" setting: "auto" (or empty) picks the fastest
@@ -117,6 +161,7 @@ pub struct GpuDevice {
 }
 
 fn hidden_command(exe: &Path) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut cmd = Command::new(exe);
     #[cfg(windows)]
     {
@@ -130,7 +175,7 @@ fn hidden_command(exe: &Path) -> Command {
 /// The GPUs an engine can use, in its own order, so the index is the `-dev` value. Read from
 /// what `whisper-server --help` prints while loading its backends. Empty for the CPU engine.
 pub fn gpu_devices(engine_dir: &Path) -> Result<Vec<GpuDevice>, String> {
-    let out = hidden_command(&engine_dir.join("whisper-server.exe"))
+    let out = hidden_command(&engine_dir.join(server_exe()))
         .current_dir(engine_dir)
         .arg("--help")
         .stdin(Stdio::null())
@@ -216,6 +261,136 @@ mod tests {
         let got: Vec<String> = ids(text).into_iter().map(|(id, _)| id).collect();
         assert_eq!(got, ["NVIDIA GeForce RTX 3080 #1", "NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3080 #2"]);
     }
+
+    fn temp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("d-scribe-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn zip_with(path: &Path, files: &[&str]) {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for name in files {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(name.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    fn install(root: &Path, kind: EngineKind) {
+        let dir = engine_dir(root, kind);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(server_exe()), "").unwrap();
+    }
+
+    #[test]
+    fn unpacks_only_the_engine_files_flat() {
+        let root = temp_dir();
+        let exe = server_exe();
+        let lib = format!("ggml{}", std::env::consts::DLL_SUFFIX);
+        zip_with(
+            &root.join("e.zip"),
+            &[&format!("Release/{exe}"), &format!("Release/{lib}"), "Release/README.md", "bench.txt"],
+        );
+        let dir = root.join("cpu.part");
+        unpack_engine(&root.join("e.zip"), &dir).unwrap();
+        let mut names: Vec<String> =
+            std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        let mut want = vec![exe.clone(), lib];
+        want.sort();
+        assert_eq!(names, want);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(&exe)).unwrap().permissions().mode();
+            assert!(mode & 0o111 != 0, "whisper-server is executable");
+        }
+    }
+
+    #[test]
+    fn a_zip_without_the_server_leaves_nothing() {
+        let root = temp_dir();
+        zip_with(&root.join("e.zip"), &["Release/ggml.dll", "Release/libggml.so"]);
+        let dir = root.join("cpu.part");
+        let err = unpack_engine(&root.join("e.zip"), &dir).unwrap_err();
+        assert!(err.contains("has no whisper-server"), "{}", err);
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn engine_files_for_this_system() {
+        assert!(is_engine_file(&server_exe()));
+        assert!(!is_engine_file("readme.md"));
+        #[cfg(windows)]
+        {
+            assert_eq!(server_exe(), "whisper-server.exe");
+            assert!(is_engine_file("ggml-vulkan.dll"));
+            assert!(!is_engine_file("whisper-server"));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(server_exe(), "whisper-server");
+            assert!(is_engine_file("libggml.so"));
+            assert!(is_engine_file("libggml.so.1"));
+            assert!(!is_engine_file("ggml.dll"));
+        }
+    }
+
+    #[test]
+    fn engines_offered_on_this_system() {
+        let available = EngineKind::available();
+        #[cfg(windows)]
+        assert_eq!(available, [EngineKind::Cuda, EngineKind::Vulkan, EngineKind::Cpu]);
+        // Every offered engine has a pinned checksum.
+        for kind in available {
+            let a = asset(kind).unwrap();
+            assert_eq!(a.sha256.len(), 64, "{:?}", kind);
+            assert!(a.url.contains(RELEASE), "{:?} url names the pinned build", kind);
+        }
+    }
+
+    #[test]
+    fn automatic_picks_the_fastest_installed_engine() {
+        let root = temp_dir();
+        assert!(chosen_engine(&root, "auto").unwrap().is_none());
+        install(&root, EngineKind::Cpu);
+        assert_eq!(chosen_engine(&root, "").unwrap().unwrap().0, EngineKind::Cpu);
+        install(&root, EngineKind::Vulkan);
+        assert_eq!(chosen_engine(&root, "auto").unwrap().unwrap().0, EngineKind::Vulkan);
+        install(&root, EngineKind::Cuda);
+        assert_eq!(chosen_engine(&root, "auto").unwrap().unwrap().0, EngineKind::Cuda);
+        assert_eq!(chosen_engine(&root, "cpu").unwrap().unwrap().0, EngineKind::Cpu);
+    }
+
+    #[test]
+    fn a_chosen_engine_that_is_missing_is_an_error() {
+        let root = temp_dir();
+        install(&root, EngineKind::Cpu);
+        let err = chosen_engine(&root, "cuda").unwrap_err();
+        assert!(err.starts_with("The NVIDIA GPU engine is not installed."), "{}", err);
+        assert!(chosen_engine(&root, "metal").is_err());
+    }
+
+    #[test]
+    fn cpu_engine_needs_no_gpu_lookup() {
+        assert_eq!(device_index(EngineKind::Cpu, Path::new("nowhere"), "Some GPU").unwrap(), None);
+        assert_eq!(device_index(EngineKind::Vulkan, Path::new("nowhere"), "").unwrap(), None);
+    }
+
+    #[test]
+    fn removes_engines_from_older_builds() {
+        let root = temp_dir();
+        install(&root, EngineKind::Cpu);
+        std::fs::create_dir_all(root.join("cpu-b1234")).unwrap();
+        std::fs::write(root.join("cuda.zip"), "partial").unwrap();
+        remove_old_engines(&root);
+        let names: Vec<String> =
+            std::fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, [format!("cpu-{RELEASE}")]);
+    }
 }
 
 /// Deletes engines from older pinned builds and leftover downloads. Run at startup, before
@@ -255,11 +430,12 @@ where
     if is_installed(engines_root, kind) {
         return Ok(dir);
     }
+    let asset = asset(kind).ok_or_else(|| format!("The {} engine isn't available on this system.", kind.label()))?;
     std::fs::create_dir_all(engines_root).map_err(|e| e.to_string())?;
     let zip_path = engines_root.join(format!("{}.zip", kind.name()));
-    super::download::download_to_file(&kind.url(), &zip_path, on_progress).await?;
+    super::download::download_to_file(&asset.url, &zip_path, on_progress).await?;
     let hash = file_sha256(&zip_path);
-    if hash.as_deref() != Ok(kind.asset_sha256()) {
+    if hash.as_deref() != Ok(asset.sha256) {
         let _ = std::fs::remove_file(&zip_path);
         return Err(format!(
             "The downloaded {} engine doesn't match its checksum ({}). Try again.",
@@ -269,34 +445,48 @@ where
     }
 
     let tmp_dir = dir.with_extension("part");
-    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let result = unpack_engine(&zip_path, &tmp_dir);
+    let _ = std::fs::remove_file(&zip_path);
+    result?;
+    std::fs::rename(&tmp_dir, &dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Unpacks the executables and libraries of an engine zip into `dir`, flattening the zip's
+/// `Release/` folder. Fails (leaving no `dir`) if there's no whisper-server in it.
+fn unpack_engine(zip_path: &Path, dir: &Path) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(dir);
     let unpack = || -> Result<(), String> {
-        let file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+        let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
         let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
             let Some(rel) = entry.enclosed_name() else { continue };
-            // Flatten the zip's Release/ folder; keep only the exe and DLLs we run.
             let Some(name) = rel.file_name() else { continue };
-            let name_s = name.to_string_lossy().to_lowercase();
-            if entry.is_dir() || !(name_s.ends_with(".dll") || name_s == "whisper-server.exe" || name_s == "whisper-cli.exe") {
+            if entry.is_dir() || !is_engine_file(&name.to_string_lossy().to_lowercase()) {
                 continue;
             }
-            std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
-            let mut out = std::fs::File::create(tmp_dir.join(name)).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            let path = dir.join(name);
+            let mut out = std::fs::File::create(&path).map_err(|e| e.to_string())?;
             std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = entry.unix_mode().unwrap_or(0o644) | 0o755;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).map_err(|e| e.to_string())?;
+            }
+        }
+        if !dir.join(server_exe()).exists() {
+            return Err(format!("The downloaded engine has no {}", server_exe()));
         }
         Ok(())
     };
     let result = unpack();
-    let _ = std::fs::remove_file(&zip_path);
-    result?;
-    if !tmp_dir.join("whisper-server.exe").exists() {
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-        return Err("The downloaded engine has no whisper-server.exe".into());
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(dir);
     }
-    std::fs::rename(&tmp_dir, &dir).map_err(|e| e.to_string())?;
-    Ok(dir)
+    result
 }
 
 pub struct Inference {
@@ -320,7 +510,7 @@ impl WhisperServer {
             .map_err(|e| e.to_string())?
             .port();
         let log = std::fs::File::create(log_path).map_err(|e| e.to_string())?;
-        let mut cmd = hidden_command(&engine.dir.join("whisper-server.exe"));
+        let mut cmd = hidden_command(&engine.dir.join(server_exe()));
         cmd.current_dir(&engine.dir).args(["--host", "127.0.0.1", "--port", &port.to_string(), "-bs", "5"]);
         if let Some(device) = engine.device {
             cmd.args(["-dev", &device.to_string()]);

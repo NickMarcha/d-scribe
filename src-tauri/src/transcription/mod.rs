@@ -13,6 +13,6 @@ pub use model_download::{
 pub use remote_api::{list_models, transcribe_via_api, RemoteTranscriptionConfig};
 pub use wav_extract::{extract_segment, rms, write_wav_from_samples};
 pub use engine::{
-    chosen_engine, device_index, download_engine, engine_dir, gpu_devices, is_installed, remove_old_engines, Engine,
+    chosen_engine, device_index, download_engine, engine_dir, gpu_devices, gpu_drivers, is_installed, remove_old_engines, Engine,
     EngineKind, GpuDevice, WhisperServer,
 };

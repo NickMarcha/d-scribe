@@ -1,0 +1,59 @@
+name: test
+
+# Runs the tests on every pull request: the frontend once, the backend on each system d-scribe
+# builds for. Linux has no recording or Discord backend yet, but it must keep compiling and
+# passing the shared tests so a Linux port only has to fill in its backends.
+on:
+  pull_request:
+  push:
+    branches:
+      - release
+    paths-ignore:
+      - site/**
+      - bot/**
+      - "*.md"
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  backend:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Linux libraries for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # The Tauri context embeds the built frontend.
+      - run: npm ci && npx vite build
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --features transcription-whisper-cli
