@@ -7,8 +7,11 @@ name: engine
 # app updater, the site and #updates ignore it). It's built once per RELEASE: if the zip is
 # already there, the build is skipped. Delete the release to rebuild.
 #
-# After a RELEASE bump: push, let this run, copy the SHA256 values it prints into
-# asset_sha256 in engine.rs, push again. The smoke test fails until they match.
+# RELEASE bumps normally come from whisper-update-check, which pushes an engine/<build> branch
+# and starts this with `version` set. On any branch other than release, this writes the
+# SHA256 values into asset_sha256 and commits them. With `version` set and the smoke test
+# passing, it opens a PR to release and an issue that the PR closes. On release, a hash that
+# doesn't match fails the smoke test.
 on:
   push:
     paths:
@@ -16,6 +19,10 @@ on:
       - .github/workflows/engine.yml
       - .github/scripts/engine_check.py
   workflow_dispatch:
+    inputs:
+      version:
+        description: whisper.cpp release (v1.x.y) the pinned build matches; opens the PR
+        required: false
 
 env:
   VULKAN_SDK_VERSION: 1.4.357.0
@@ -111,9 +118,31 @@ jobs:
           echo "Vulkan zip SHA256: $(sha256sum whisper-bin-win-vulkan-x64.zip | cut -d' ' -f1)"
           echo "Size: $(stat -c %s whisper-bin-win-vulkan-x64.zip) bytes"
 
+  # Off release: write the SHA256 of each download into engine.rs and commit it.
+  hashes:
+    needs: vulkan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+      - if: github.ref_name != 'release'
+        run: python -I .github/scripts/engine_check.py --update-hashes --work engine-check
+      - id: commit
+        run: |
+          if [ "$GITHUB_REF_NAME" != release ] && ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            git commit -am "Engine hashes for ${GITHUB_REF_NAME#engine/}"
+            git push
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   # Downloads each engine the way the app does and checks it against engine.rs.
   smoke-test:
-    needs: vulkan
+    needs: hashes
     runs-on: windows-2025
     strategy:
       fail-fast: false
@@ -125,4 +154,34 @@ jobs:
             args: --hash-only
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.hashes.outputs.sha }}
       - run: python -I .github/scripts/engine_check.py --kind ${{ matrix.kind }} --work engine-check ${{ matrix.args }}
+
+  # A bump branch that passed: open a PR to release, plus an issue the PR closes. Merging
+  # doesn't publish anything; the new engine ships with the next version bump.
+  pull-request:
+    needs: smoke-test
+    if: inputs.version != '' && github.ref_name != 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          [ -z "$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')" ] || exit 0
+          build=${BRANCH#engine/}
+          issue=$(gh issue create --title "Transcription engine update to whisper.cpp $VERSION is ready" --body "whisper.cpp [$VERSION](https://github.com/ggml-org/whisper.cpp/releases/tag/$VERSION) has Windows builds (\`$build\`). The bump is built, smoke-tested and waiting in a PR. Merge it to ship it with the next app release.")
+          gh pr create --base release --head "$BRANCH" \
+            --title "Transcription engine updated to whisper.cpp $VERSION" \
+            --body "Moves \`RELEASE\` to \`$build\`, the Windows build of whisper.cpp [$VERSION](https://github.com/ggml-org/whisper.cpp/releases/tag/$VERSION). The Vulkan zip is built and every engine passed the smoke test (Vulkan only on its CPU fallback).
+
+          Before merging, ask a tester with AMD or Intel graphics to try the Vulkan engine. Merging doesn't publish a release; this ships with the next version bump.
+
+          Closes #${issue##*/}"
