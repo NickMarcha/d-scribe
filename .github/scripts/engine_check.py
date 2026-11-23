@@ -4,6 +4,8 @@
                                                  check its SHA256 against engine.rs, run it
   python engine_check.py --zip FILE --work DIR   run a local engine zip (before uploading it)
   python engine_check.py --kind cuda --hash-only check the download only (no NVIDIA GPU in CI)
+  python engine_check.py --update-hashes          download every engine and write its SHA256
+                                                 into asset_sha256 in engine.rs
 
 Running means: start whisper-server.exe the way the app does, transcribe whisper.cpp's jfk.wav
 sample with language "auto" and response_format "verbose_json", and check the fields the app
@@ -36,6 +38,17 @@ def engine_rs():
     sha_fn = sha_fn[: sha_fn.index("\n    }\n")]
     hashes = dict(re.findall(r'Self::(\w+) => "([^"]+)",', sha_fn))
     return release, urls, hashes
+
+
+def update_hashes(work):
+    """Writes the SHA256 of each engine's download into asset_sha256 in engine.rs."""
+    release, urls, hashes = engine_rs()
+    src = open(ENGINE_RS, encoding="utf8").read()
+    for kind, variant in KINDS.items():
+        actual = sha256(fetch(urls[variant], os.path.join(work, f"{kind}-{release}.zip")))
+        print(f"{kind} engine for {release}: SHA256 {actual}")
+        src = src.replace(f'Self::{variant} => "{hashes[variant]}",', f'Self::{variant} => "{actual}",')
+    open(ENGINE_RS, "w", encoding="utf8", newline="\n").write(src)
 
 
 def fetch(url, path):
@@ -146,9 +159,12 @@ def main():
     ap.add_argument("--zip")
     ap.add_argument("--work", default="engine-check")
     ap.add_argument("--hash-only", action="store_true")
+    ap.add_argument("--update-hashes", action="store_true")
     args = ap.parse_args()
     args.work = os.path.abspath(args.work)
     os.makedirs(args.work, exist_ok=True)
+    if args.update_hashes:
+        return update_hashes(args.work)
     release, urls, hashes = engine_rs()
     problems = []
 
